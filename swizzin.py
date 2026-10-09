@@ -202,6 +202,12 @@ def index(user):
 def socket_connect():
     global thread
     global thread2
+    # The HTTP routes are protected by @htpasswd.required, but this handler was not:
+    # anyone able to reach the panel could open the websocket and receive the live
+    # broadcasts (network speed, iowait). Refuse clients that are not logged in.
+    is_valid, user = htpasswd.authenticate()
+    if not is_valid:
+        return False
     with thread_lock:
         if thread is None:
             thread = socketio.start_background_task(current_speed, (flask.current_app._get_current_object()))
