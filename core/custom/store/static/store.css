@@ -1,6 +1,8 @@
 /* App Store page, in the dashboard's darkly theme. */
 .store { padding-top: 1rem; padding-bottom: 2rem; }
 .store-intro { max-width: 52rem; }
+/* Bootstrap's .d-flex (display: flex !important) would win over the hidden attribute: the banner stayed visible */
+.d-flex[hidden] { display: none !important; }
 .store-toolbar { margin-bottom: .25rem; }
 #store-search { max-width: 20rem; }
 .store-heading { margin: 1rem 0 .75rem; }
