@@ -18,8 +18,9 @@
       var shown = 0;
       Array.prototype.forEach.call(section.querySelectorAll(".store-item"), function (item) {
         var installed = item.getAttribute("data-installed") === "yes";
+        var available = !installed && item.getAttribute("data-available") !== "no";
         var visible = (!query || item.getAttribute("data-text").indexOf(query) !== -1) &&
-          (filter === "all" || (filter === "installed") === installed);
+          (filter === "all" || (filter === "installed" ? installed : available));
         item.hidden = !visible;
         if (visible) {
           shown++;
@@ -156,13 +157,22 @@
     $("#store-terminal").modal("show");
   }
 
+  function card(app) {
+    return document.querySelector('.store-item[data-app="' + app + '"]');
+  }
+
   function result(done) {
     if (done.result === "installed" && done.test === "passed") {
       return ["Installed ✓ — checks passed", "success"];
     }
     if (done.result === "installed") {
-      return [done.generic_test ? "Installed — the generic check failed (normal for some apps)" :
-        "Installed, but its checks failed: read the terminal", "warning"];
+      var item = card(done.app);
+      if (item && item.getAttribute("data-check") === "unreliable") {  // see UNRELIABLE_CHECK in __init__.py
+        return ["Installed — Swizzin's check cannot verify this app: open it to make sure it runs", "info"];
+      }
+      var later = done.retested ? ", also a minute later" : "";
+      return [done.generic_test ? "Installed, but Swizzin's generic check failed" + later + ": open the app to check" :
+        "Installed, but its checks failed" + later + ": read the terminal", "warning"];
     }
     if (done.result === "interrupted") {
       return ["Interrupted", "danger"];
@@ -170,8 +180,20 @@
     return ["Not installed — read the terminal for the reason", "danger"];
   }
 
+  function showOpen(app) {  // the app's page, built like the sidebar's links (scheme://host + baseurl)
+    var item = card(app);
+    var path = item && item.getAttribute("data-path");
+    var link = el("store-open");
+    link.hidden = !path;
+    if (path) {
+      var scheme = item.getAttribute("data-scheme") || window.location.protocol.replace(":", "");
+      link.href = scheme + "://" + window.location.hostname + path;
+      link.textContent = "Open " + item.querySelector(".store-name").textContent;
+    }
+  }
+
   function markInstalled(app) {
-    var item = document.querySelector('.store-item[data-app="' + app + '"]');
+    var item = card(app);
     if (!item) {
       return;
     }
@@ -212,6 +234,7 @@
       controlKey = msg.control_key;
       $("#store-confirm").modal("hide");
       terminal().reset();
+      el("store-open").hidden = true;
       status("Installing…");
       controls();
       setInstallButtons();
@@ -223,6 +246,7 @@
         controlKey = msg.control_key;
       }
       terminal().reset();  // the helper replays the output next
+      el("store-open").hidden = true;
       status(job.phase === "test" ? "Checking…" : (job.phase === "done" ? "" : "Installing…"));
       controls();
       resize();
@@ -231,6 +255,8 @@
     } else if (msg.phase === "test") {
       job.phase = "test";
       status("Checking…");
+    } else if (msg.phase === "retest") {  // the first checks failed: the helper checks again a bit later
+      status("Checking again in " + msg.seconds + " s…");
     } else if (msg.done) {
       job = msg.done;
       controller = false;
@@ -238,6 +264,7 @@
       status(r[0], r[1]);
       if (job.result === "installed") {
         markInstalled(job.app);
+        showOpen(job.app);
       }
       el("store-reload").hidden = false;
       controls();
@@ -271,6 +298,9 @@
     b.addEventListener("click", function () {
       el("store-confirm-app").textContent = b.getAttribute("data-pretty");
       el("store-confirm-command").textContent = "box install " + b.getAttribute("data-app");
+      var note = card(b.getAttribute("data-app")).getAttribute("data-note");  // see NOTES in __init__.py
+      el("store-confirm-note").textContent = note || "";
+      el("store-confirm-note").hidden = !note;
       el("store-confirm-form").setAttribute("data-app", b.getAttribute("data-app"));
       el("store-confirm-error").textContent = "";
       if (askPassword) {

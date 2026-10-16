@@ -47,8 +47,8 @@
       <h5 class="store-heading">Applications <span class="badge badge-secondary store-count">{{ apps|length }}</span></h5>
       <div class="row">
         {% for e in apps %}
-        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}">
-          <div class="card h-100 store-card{{ ' installed' if e.installed }}">
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}" data-available="{{ 'no' if e.unavailable and not e.installed else 'yes' }}"{% if e.path %} data-path="{{ e.path }}"{% endif %}{% if e.scheme %} data-scheme="{{ e.scheme }}"{% endif %}{% if e.unreliable_check %} data-check="unreliable"{% endif %}{% if e.note %} data-note="{{ e.note }}"{% endif %}>
+          <div class="card h-100 store-card{{ ' installed' if e.installed }}{{ ' unavailable' if e.unavailable and not e.installed }}">
             <div class="card-body">
               <div class="d-flex align-items-center mb-2">
                 {% if e.icon %}<img class="store-icon" src="{{ url_for('static', filename=e.icon) }}" alt="">{% else %}<span class="store-icon store-letter" aria-hidden="true">{{ e.pretty[:1]|upper }}</span>{% endif %}
@@ -62,14 +62,20 @@
             <div class="card-footer store-foot">
               {% if e.installed %}
               <span class="badge badge-success">Installed</span>
+              {% elif e.unavailable %}
+              <span class="badge badge-secondary">Not available for now</span>
+              <small class="text-muted d-block mt-1 store-reason">{{ e.unavailable }}</small>
               {% elif e.missing %}
               <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Install</button>
               <small class="text-muted ml-1">Requires {{ e.missing|join(", ") }}</small>
               {% else %}
               <button type="button" class="btn btn-sm btn-primary store-install" data-app="{{ e.name }}" data-pretty="{{ e.pretty }}">Install</button>
               {% endif %}
-              {% if e.conflicts and not e.installed %}
+              {% if e.conflicts and not e.installed and not e.unavailable %}
               <small class="text-warning d-block mt-1">The installer will offer to disable {{ e.conflicts|join(", ") }}.</small>
+              {% endif %}
+              {% if e.note and not e.installed and not e.unavailable %}
+              <small class="text-warning d-block mt-1 store-note-card">{{ e.note }}</small>
               {% endif %}
             </div>
           </div>
@@ -87,7 +93,8 @@
             <button type="button" class="close" data-dismiss="modal" aria-label="Cancel"><span aria-hidden="true">&times;</span></button>
           </div>
           <div class="modal-body">
-            <p>This runs <code id="store-confirm-command"></code> on the server as root, like over SSH. Some installations take several minutes, and the installer may ask you questions in the terminal. Closing the terminal window does not stop the installation.</p>
+            <p>This runs <code id="store-confirm-command"></code> on the server as root, like over SSH. It usually takes 1 to 5 minutes, and the installer may ask you questions in the terminal: its default answer is usually the right one. Closing the terminal window does not stop the installation.</p>
+            <p class="text-warning" id="store-confirm-note" hidden></p>
             {% if ask_password %}
             <label for="store-confirm-password">Your panel password, to confirm</label>
             <input type="password" class="form-control" id="store-confirm-password" autocomplete="current-password" required>
@@ -135,6 +142,7 @@
               <small class="text-danger ml-2" id="store-terminal-error" role="alert"></small>
             </div>
             <div>
+              <a class="btn btn-sm btn-primary" id="store-open" target="_blank" rel="noopener" hidden></a>
               <button type="button" class="btn btn-sm btn-success" id="store-reload" hidden>Reload the page</button>
               <button type="button" class="btn btn-sm btn-secondary" id="store-close">Close</button>
             </div>

@@ -41,6 +41,70 @@ REQUIRES = {"rutorrent": ["nginx", "rtorrent"], "flood": ["rtorrent"], "qui": ["
 CONFLICTS = {"emby": ["jellyfin"], "jellyfin": ["emby"], "medusa": ["sickchill", "sickgear"],
              "sickchill": ["medusa", "sickgear"], "sickgear": ["medusa", "sickchill"]}
 
+# From the compatibility campaign (tests/campaign/: each app installed through the helper in a fresh Swizzin,
+# Ubuntu 24.04, 2026-10-16). The App Store aims at installing in one click. An entry can be limited to some
+# systems (VERSION_CODENAME in /etc/os-release): the campaign only tested Ubuntu 24.04 ("noble").
+# Not offered for now: the installation fails, the app does not work afterwards, or it needs too many answers.
+UNAVAILABLE = {
+    "calibre": ("Swizzin's Calibre installer fails on Ubuntu 24.04 (swizzin/swizzin#1212).", {"noble"}),
+    "calibrecs": ("Needs Calibre, whose Swizzin installer fails on Ubuntu 24.04 (swizzin/swizzin#1212).", {"noble"}),
+    "jfago": ("Its page is not found: Swizzin's web address for jfa-go does not match the current jfa-go.", None),
+    "lounge": ("The current The Lounge needs Node.js 22, and Swizzin installs Node.js 20.", None),
+    "navidrome": ("Not checked yet: its service needs system rights that the test machine did not give.", None),
+    "netdata": ("Not checked yet: its service needs system rights that the test machine did not give.", None),
+    "nextcloud": ("It asks for three passwords in the terminal, and its page then reports missing PHP modules.", None),
+    "ombi": ("Ombi's own package fails to install (Ombi-app/Ombi#5448).", None),
+    "rapidleech": ("Swizzin's web setup for Rapidleech does not work, and Rapidleech is no longer maintained.", None),
+    "sabnzbd": ("Its page is not found: Swizzin's web address for SABnzbd does not match the current SABnzbd.", None),
+    "sickchill": ("Its service stops right after starting.", None),
+    "znc": ("Its setup asks many questions in the terminal: install it over SSH for now.", None),
+}
+_EXPOSED = "Its own page is also open on port {}, without your Swizzin password in front: a firewall should block that port."
+# Offered, with something to know before installing.
+NOTES = {
+    "airsonic": ("Its default login is admin / admin, with no Swizzin password in front: change it right after "
+                 "installing.", None),
+    "btsync": (_EXPOSED.format(8888), None),
+    "calibreweb": ("When it offers to install Calibre, answer n: Swizzin's Calibre installer fails on Ubuntu 24.04, "
+                   "and Calibre-Web works without it.", {"noble"}),
+    "emby": ("Finish its setup right after installing: the first visitor creates the admin account, with no Swizzin "
+             "password in front. " + _EXPOSED.format(8096), None),
+    "jackett": (_EXPOSED.format(9117), None),
+    "librespeed": ("Its page is public, with no password: anyone who can reach your server can run speed tests.", None),
+    "nzbhydra": (_EXPOSED.format(5076), None),
+    "quassel": ("Opens port 4242, where the Quassel apps connect.", None),
+    "rtorrent": ("Takes about 20 minutes: rTorrent is compiled. On Ubuntu 24.04 it also installs Performance Co-Pilot, "
+                 "which opens ports 44321 to 44323 and 4330: a firewall should block them.", None),
+    "rutorrent": ("Takes about 5 minutes.", None),
+    "sickgear": (_EXPOSED.format(8081), None),
+    "syncthing": ("Opens port 22000, to sync with your other devices.", None),
+    "tautulli": ("Takes about 15 minutes. Its page has no Swizzin password in front: set a login in its settings right "
+                 "after installing.", None),
+    "transmission": (_EXPOSED.format(9091), None),
+}
+# Swizzin's checks (box test) fail for these although the app works (the generic check cannot find the port or
+# the service, or does not expect what the app answers): the page says so instead of reporting a failure.
+UNRELIABLE_CHECK = {"bazarr", "btsync", "emby", "filebrowser", "flood", "jackett", "lidarr", "medusa", "organizr",
+                    "prowlarr", "quassel", "qui", "radarr", "sickgear", "sonarr", "syncthing"}
+
+
+def os_codename(path="/etc/os-release"):
+    """'noble', 'bookworm'... or None."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("VERSION_CODENAME="):
+                    return line.split("=", 1)[1].strip().strip('"') or None
+    except OSError:
+        pass
+    return None
+
+
+def for_system(table, name, codename):
+    """The text of table[name] if it applies to this system, else None."""
+    text, systems = table.get(name, (None, None))
+    return text if text and (systems is None or codename in systems) else None
+
 
 class StoreUnavailable(Exception):
     pass
@@ -64,7 +128,7 @@ def helper_call(request, path, timeout=3):
         raise StoreUnavailable(str(e))
 
 
-def entries(apps, static_folder):
+def entries(apps, static_folder, codename=None):
     """What the page shows for each app. The apps the helper does not offer (system components and
     tools set up on the machine itself, see BLOCKED in store-helper/swizzin_store.py) are left out."""
     installed = {a["name"] for a in apps if a.get("installed")}
@@ -84,6 +148,12 @@ def entries(apps, static_folder):
             "missing": [r for r in REQUIRES.get(name, []) if r not in installed],
             "conflicts": [c for c in CONFLICTS.get(name, []) if c in installed],
             "icon": icon if os.path.isfile(os.path.join(static_folder, icon)) else None,
+            "unavailable": for_system(UNAVAILABLE, name, codename),
+            "note": for_system(NOTES, name, codename),
+            "unreliable_check": name in UNRELIABLE_CHECK,
+            # the address of the app's page, completed in the browser like the sidebar does (core/util.py)
+            "path": getattr(profile, "baseurl", None),
+            "scheme": getattr(profile, "scheme", None),
         })
     return sorted(shown, key=lambda e: e["pretty"].lower())
 
@@ -165,7 +235,7 @@ def register(app, socketio, htpasswd):
         except StoreUnavailable as e:
             app.logger.warning("App Store helper unavailable: %s", e)
             reply, error = {}, "unavailable"
-        shown = entries(reply.get("apps", []), app.static_folder)
+        shown = entries(reply.get("apps", []), app.static_folder, os_codename(app.config.get("STORE_OS_RELEASE", "/etc/os-release")))
         vendor = "sbio" if os.path.isfile("/install/.sbio.lock") else "swizzin"
         response = flask.make_response(flask.render_template(
             "store/store.html", title="App Store", user=user, pages=util.generate_page_list(user),

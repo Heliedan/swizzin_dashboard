@@ -38,8 +38,12 @@ class StorePage(unittest.TestCase):
     def setUpClass(cls):
         cls.base = tempfile.mkdtemp()
         fake_swizzin(cls.base)
-        open(os.path.join(cls.base, "scripts", "rutorrent.sh"), "w").close()
-        open(os.path.join(cls.base, "scripts", "emby.sh"), "w").close()
+        for app in ("rutorrent", "emby", "lounge", "calibre", "calibreweb"):
+            open(os.path.join(cls.base, "scripts", app + ".sh"), "w").close()
+        cls.os_release = os.path.join(cls.base, "os-release")
+        with open(cls.os_release, "w") as f:
+            f.write('NAME="Ubuntu"\nVERSION_CODENAME=noble\n')
+        swizzin.app.config["STORE_OS_RELEASE"] = cls.os_release
         with open(os.path.join(cls.base, "lang_en"), "a") as f:
             f.write("$L['EMBY'] = '<script>alert(1)</script> media server';\n")
         cls.helper = Helper(cls.base)
@@ -56,6 +60,51 @@ class StorePage(unittest.TestCase):
     def page(self, user="tester"):
         r = self.client.get("/apps", headers=auth(user))
         return r, r.get_data(as_text=True)
+
+    @staticmethod
+    def item(html, app):
+        """The card of one app in the page."""
+        start = html.index('store-item" data-app="%s"' % app)
+        end = html.find('store-item" data-app=', start + 1)
+        return html[start:end if end != -1 else None]
+
+    def page_on(self, codename):
+        path = os.path.join(self.base, "os-release-" + codename)
+        with open(path, "w") as f:
+            f.write("VERSION_CODENAME=%s\n" % codename)
+        swizzin.app.config["STORE_OS_RELEASE"] = path
+        try:
+            return self.page()[1]
+        finally:
+            swizzin.app.config["STORE_OS_RELEASE"] = self.os_release
+
+    def test_unavailable_apps_are_greyed_with_the_reason(self):
+        lounge = self.item(self.page()[1], "lounge")
+        self.assertIn('data-available="no"', lounge)
+        self.assertIn("Not available for now", lounge)
+        self.assertIn("needs Node.js 22", lounge)
+        self.assertNotIn("store-install", lounge)
+
+    def test_some_entries_are_for_ubuntu_24_04_only(self):
+        noble, bookworm = self.page_on("noble"), self.page_on("bookworm")
+        self.assertIn("Not available for now", self.item(noble, "calibre"))
+        self.assertIn("store-install", self.item(bookworm, "calibre"))  # not tested there: offered as usual
+        self.assertIn("answer n", self.item(noble, "calibreweb"))
+        self.assertNotIn("answer n", self.item(bookworm, "calibreweb"))
+        self.assertIn("needs Node.js 22", self.item(bookworm, "lounge"))  # broken everywhere
+
+    def test_notes_checks_and_addresses_for_the_page(self):
+        html = self.page()[1]
+        emby = self.item(html, "emby")
+        self.assertIn('data-note="Finish its setup right after installing', emby)
+        self.assertIn('store-note-card">Finish its setup right after installing', emby)
+        self.assertIn("also open on port 8096", emby)
+        sonarr = self.item(html, "sonarr")
+        self.assertIn('data-check="unreliable"', sonarr)
+        self.assertIn('data-path="/sonarr"', sonarr)
+        self.assertIn('data-note="Takes about 5 minutes."', self.item(html, "rutorrent"))
+        self.assertNotIn("data-check", self.item(html, "jellyfin"))
+        self.assertNotIn("data-note", self.item(html, "jellyfin"))
 
     def test_admin_sees_the_catalogue(self):
         r, html = self.page()

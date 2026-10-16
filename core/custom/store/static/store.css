@@ -6,6 +6,8 @@
 .store-heading { margin: 1rem 0 .75rem; }
 .store-card { border: 1px solid rgba(255, 255, 255, .08); }
 .store-card.installed { border-color: rgba(0, 188, 140, .45); }  /* darkly's success colour */
+.store-card.unavailable { opacity: .65; }  /* not offered for now: the reason is in the footer */
+.store-reason, .store-note-card { font-size: .8rem; }
 .store-icon { width: 36px; height: 36px; flex: 0 0 36px; margin-right: .65rem; object-fit: contain; }
 .store-letter {
   display: inline-flex; align-items: center; justify-content: center;
