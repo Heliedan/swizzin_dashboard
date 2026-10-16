@@ -8,7 +8,7 @@
 
   function couleur(el, pct) {
     if (!el) { return; }
-    el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary');
+    el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'disk-unavailable');
     el.classList.add(niveau(pct));
   }
 
@@ -65,6 +65,7 @@
     texte('cpumodel', c.model + (c.freq ? ' · ' + c.freq : ''));
     barre(document.getElementById('cpuprogress'), c.used);
     couleur(document.getElementById('cpuindicator'), Number(c.used));
+    var ci = document.getElementById('cpuindicator'); if (ci) { ci.title = 'CPU : ' + c.used + ' %'; }
     parCoeur(c.percore);
     texte('cpuuser', c.user);
     texte('cpusystem', c.system);
@@ -79,11 +80,53 @@
     texte('rampercent', r.perutil);
     barre(document.getElementById('ramprogress'), r.perutil);
     couleur(document.getElementById('ramindicator'), Number(r.perutil));
+    var ri = document.getElementById('ramindicator'); if (ri) { ri.title = 'RAM : ' + r.perutil + ' %'; }
+  }
+
+  function etatDisque(m, indisponible) {  // badge « INDISPONIBLE » à côté du nom du disque, ligne du % masquée
+    var cell = document.getElementById(m + 'diskused');
+    var nom = cell && cell.parentElement ? cell.parentElement.firstElementChild : null;
+    var badge = nom ? nom.querySelector('.disk-badge') : null;
+    if (indisponible && nom && !badge) {  // au-dessus du nom du disque
+      badge = document.createElement('div');
+      badge.className = 'disk-badge mb-1';
+      var etiquette = document.createElement('span');
+      etiquette.className = 'badge badge-danger';
+      etiquette.textContent = 'INDISPONIBLE';
+      badge.appendChild(etiquette);
+      nom.insertBefore(badge, nom.firstChild);
+    }
+    if (!indisponible && badge) { badge.parentNode.removeChild(badge); }
+    var pct = document.getElementById(m + 'diskpercent');  // « 87.00% » : on vide la ligne sans la masquer (garde le contour)
+    if (pct) {
+      if (indisponible) { pct.textContent = ''; }
+      if (pct.nextSibling && pct.nextSibling.nodeType === 3) { pct.nextSibling.nodeValue = indisponible ? '' : '%'; }
+    }
   }
 
   function disques(d) {
+    // Disques affichés sur la page mais absents des données (démontés depuis le chargement) : indisponibles.
+    var carte = document.getElementById('carte-disque');
+    if (carte) {
+      Array.prototype.forEach.call(carte.querySelectorAll('[id$="diskused"]'), function (el) {
+        var m = el.id.slice(0, -'diskused'.length);
+        if (!(m in d)) { d[m] = { unavailable: true }; }
+      });
+    }
     Object.keys(d).forEach(function (m) {
       var x = d[m];
+      if (x.unavailable) {  // disque illisible (débranché, partage réseau perdu...) : pas de chiffres périmés
+        ['diskused', 'diskfree', 'disktotal'].forEach(function (k) { texte(m + k, ''); });
+        ['diskread', 'diskwrite'].forEach(function (k) { texte(m + k, '—'); });
+        var b = document.getElementById(m + 'diskprogress');
+        if (b) { b.style.width = '0%'; b.setAttribute('aria-valuenow', 0); }
+        etatDisque(m, true);
+        // Les pastilles disent le remplissage : un disque illisible n'a pas de couleur mais le symbole ⊘ (gris barré).
+        var p = document.getElementById(m + 'indicator');
+        if (p) { p.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary'); p.classList.add('disk-unavailable'); p.title = m + ' : indisponible'; }
+        return;
+      }
+      etatDisque(m, false);
       texte(m + 'diskused', x.diskused);
       texte(m + 'diskfree', x.diskfree);
       texte(m + 'disktotal', x.disktotal);
@@ -91,7 +134,9 @@
       texte(m + 'diskread', x.read);
       texte(m + 'diskwrite', x.write);
       barre(document.getElementById(m + 'diskprogress'), x.perutil);
-      couleur(document.getElementById(m + 'indicator'), Number(x.perutil));
+      var ind = document.getElementById(m + 'indicator');
+      couleur(ind, Number(x.perutil));
+      if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // au survol : le remplissage en clair
     });
   }
 

@@ -8,6 +8,9 @@ import time
 import core.util as util  # import du module seulement : core.util et swizzin.py s'importent mutuellement au démarrage
 
 
+RELIRE_DISQUES = 30  # secondes entre deux relectures de la liste des disques
+
+
 def _cpu():
     """Compteurs de /proc/stat : {'cpu': [user, nice, system, idle, iowait, irq, softirq, steal], 'cpu0': [...], ...}."""
     out = {}
@@ -93,9 +96,12 @@ def mesure(avant, apres, duree, modele, freq, devs):
     disques = {}
     for mnt, dev in devs.items():
         try:
+            if not os.path.ismount(mnt):  # disque démonté : le dossier vide donnerait les chiffres du disque parent
+                raise OSError("plus monté")
             taille, utilise, libre, pct = util.disk_usage(mnt)
-        except OSError:
-            continue  # un montage illisible ne doit pas figer les cartes CPU et RAM
+        except OSError:  # un montage illisible ne doit pas figer les cartes CPU et RAM
+            disques[mnt] = {"unavailable": True}  # la carte affiche « — » au lieu de chiffres périmés
+            continue
         lu, ecrit = (b - a for a, b in zip(disq_a.get(dev, (0, 0)), disq_b.get(dev, (0, 0))))
         disques[mnt] = {"disktotal": taille, "diskused": utilise, "diskfree": libre, "perutil": pct,
                         "read": util.GetHumanReadableBi(lu * 512 / duree) + "/s",
@@ -114,10 +120,12 @@ def live_stats(app, socketio):
     """Tâche de fond lancée à la première connexion au websocket : un relevé par seconde, émis à tous les navigateurs."""
     with app.app_context():
         modele, freq = _modele()
-        devs = _peripheriques()
+        devs, relire = _peripheriques(), time.monotonic() + RELIRE_DISQUES
         avant, t_avant = None, None
         while True:
             try:
+                if time.monotonic() >= relire:  # un disque branché ou retiré pendant que le panel tourne
+                    devs, relire = _peripheriques(), time.monotonic() + RELIRE_DISQUES
                 apres, t_apres = (_cpu(), _disques()), time.monotonic()
                 if avant is not None:
                     socketio.emit('live', mesure(avant, apres, max(t_apres - t_avant, 0.001), modele, freq, devs),

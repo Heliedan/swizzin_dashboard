@@ -68,7 +68,17 @@ class DiskRobustness(unittest.TestCase):
         self.assertIn("cpu", data)
         self.assertIn("ram", data)
         self.assertIn("/", data["disks"])
-        self.assertNotIn(MISSING, data["disks"])
+        self.assertEqual(data["disks"][MISSING], {"unavailable": True})  # shown as « — », not stale numbers
+
+    def test_unmounted_disk_is_unavailable(self):
+        """A disk unmounted while the panel runs leaves an empty folder: it must not show the parent disk's numbers."""
+        dossier = tempfile.mkdtemp()  # exists, but is not a mount point
+        cpu = {"cpu": [1, 0, 1, 10, 0, 0, 0, 0]}
+        cpu2 = {"cpu": [2, 0, 2, 20, 0, 0, 0, 0]}
+        with swizzin.app.app_context():
+            data = live_stats.mesure((cpu, {}), (cpu2, {}), 1.0, "test", "", {"/": "sda1", dossier: "sdb1"})
+        self.assertEqual(data["disks"][dossier], {"unavailable": True})
+        self.assertIn("disktotal", data["disks"]["/"])
 
 
 if __name__ == "__main__":
