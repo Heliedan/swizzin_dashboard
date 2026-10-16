@@ -59,6 +59,7 @@
     "unknown": "Swizzin does not know this application.",
     "invalid": "Swizzin does not know this application.",
     "not-controller": "Another window controls this installation: use Take control to type in it.",
+    "control-lost": "Another window took control of this installation: use Take control to type in it again.",
     "unavailable": "The App Store helper cannot be reached (systemctl status swizzin-store).",
     "helper-down": "Lost the App Store helper; trying again…",
     "unreadable": "The App Store helper could not read Swizzin's files.",
@@ -71,6 +72,7 @@
   var controller = false;
   var controlKey = null;  // kept in memory only: lets this tab type again after a reconnection
   var pending = null;  // the app whose installation was just asked for
+  var retry = null;  // timer of the next attempt to reach the helper again
 
   try {
     job = JSON.parse(root.getAttribute("data-job") || "null");
@@ -207,9 +209,46 @@
     foot.appendChild(badge);
   }
 
+  function finish(done) {  // the installation ended: its result, and the page back to normal
+    job = done;
+    controller = false;
+    var r = result(job);
+    status(r[0], r[1]);
+    if (job.result === "installed") {
+      markInstalled(job.app);
+      showOpen(job.app);
+    }
+    el("store-reload").hidden = false;
+    controls();
+    setInstallButtons();
+  }
+
+  function reattach() {  // the helper went away: try again until it answers, without stacking attempts
+    if (retry === null) {
+      retry = setTimeout(function () {
+        retry = null;
+        if (running() && socket) {
+          socket.emit("attach", controlKey ? {control_key: controlKey} : {});
+        }
+      }, 3000);
+    }
+  }
+
   function onHelper(msg) {
+    if (msg.control === "lost") {  // another window took control (its key replaced ours)
+      controller = false;
+      controlKey = null;
+      el("store-terminal-error").textContent = MESSAGES["control-lost"];
+      controls();
+      return;
+    }
     if (msg.ok === false) {
-      if (msg.error === "no-job") {
+      if (msg.error === "no-job") {  // a helper that restarted has no installation: the one shown was stopped
+        if (running()) {
+          el("store-terminal-error").textContent = "";
+          finish({id: job.id, app: job.app, phase: "done", result: "interrupted", test: null});
+          showBanner();
+        }
         return;
       }
       var text = MESSAGES[msg.error] || ("Error: " + msg.error);
@@ -221,8 +260,12 @@
         return;
       }
       el("store-terminal-error").textContent = text;
-      if (msg.error === "helper-down" && running()) {
-        setTimeout(function () { socket.emit("attach", controlKey ? {control_key: controlKey} : {}); }, 3000);
+      if (msg.error === "not-controller") {  // control went to another window: show it
+        controller = false;
+        controls();
+      }
+      if ((msg.error === "helper-down" || msg.error === "unavailable") && running()) {
+        reattach();
       }
       return;
     }
@@ -232,13 +275,12 @@
       job = msg.started;
       controller = true;
       controlKey = msg.control_key;
-      $("#store-confirm").modal("hide");
       terminal().reset();
       el("store-open").hidden = true;
       status("Installing…");
       controls();
       setInstallButtons();
-      openTerminal();
+      closeConfirmThen(openTerminal);
     } else if (msg.attached) {
       job = msg.attached;
       controller = msg.controller;
@@ -258,17 +300,7 @@
     } else if (msg.phase === "retest") {  // the first checks failed: the helper checks again a bit later
       status("Checking again in " + msg.seconds + " s…");
     } else if (msg.done) {
-      job = msg.done;
-      controller = false;
-      var r = result(job);
-      status(r[0], r[1]);
-      if (job.result === "installed") {
-        markInstalled(job.app);
-        showOpen(job.app);
-      }
-      el("store-reload").hidden = false;
-      controls();
-      setInstallButtons();
+      finish(msg.done);
     }
     showBanner();
   }
@@ -310,9 +342,25 @@
       $("#store-confirm").modal("show");
     });
   });
+  var confirmOpen = false;  // the confirmation window has finished opening (Bootstrap ignores hide() before that)
   $("#store-confirm").on("shown.bs.modal", function () {
+    confirmOpen = true;
     el(askPassword ? "store-confirm-password" : "store-confirm-go").focus();
   });
+  $("#store-confirm").on("hide.bs.modal", function () { confirmOpen = false; });
+
+  function closeConfirmThen(next) {  // Bootstrap shows one window at a time: next() once the confirmation is closed
+    if (!el("store-confirm").classList.contains("show")) {
+      next();
+      return;
+    }
+    $("#store-confirm").one("hidden.bs.modal", next);
+    if (confirmOpen) {
+      $("#store-confirm").modal("hide");
+    } else {  // still opening: close it as soon as it is open
+      $("#store-confirm").one("shown.bs.modal", function () { $("#store-confirm").modal("hide"); });
+    }
+  }
 
   el("store-confirm-form").addEventListener("submit", function (event) {
     event.preventDefault();
@@ -388,4 +436,7 @@
 
   setInstallButtons();
   showBanner();
+  if (running()) {  // an installation runs: follow it, so that the page learns when it ends
+    connect();
+  }
 })();
