@@ -26,6 +26,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
 
 import swizzin  # noqa: E402  (first: it runs eventlet.monkey_patch())
 import eventlet  # noqa: E402
+from unittest import mock  # noqa: E402
 from core.htpasswd import FailedLogins  # noqa: E402
 from test_store_helper import Helper  # noqa: E402
 from test_store_install import fake_installers  # noqa: E402
@@ -60,10 +61,10 @@ class StoreSocket(unittest.TestCase):
     def token(self, user="tester"):
         return self.client.get("/store/token", headers=auth(user)).get_json()["token"]
 
-    def tab(self, user="tester", token=None, headers=None):
-        tab = swizzin.socketio.test_client(swizzin.app, namespace="/store", flask_test_client=self.client,
-                                           headers={**auth(user), **(headers or {})},
-                                           auth={"token": self.token() if token is None else token})
+    def tab(self, user="tester", token=None, headers=None, namespace="/store"):
+        tab = swizzin.socketio.test_client(swizzin.app, namespace=namespace, flask_test_client=self.client,
+                                           headers={**(auth(user) if user else {}), **(headers or {})},
+                                           auth={"token": self.token() if token is None else token} if namespace == "/store" else None)
         self.tabs.append(tab)
         return tab
 
@@ -101,6 +102,46 @@ class StoreSocket(unittest.TestCase):
         self.assertFalse(self.tab(user="other", token=self.token()).is_connected("/store"))
         self.assertFalse(self.tab(headers={"Sec-Fetch-Site": "cross-site"}).is_connected("/store"))
         self.assertFalse(self.tab(headers={"Sec-Fetch-Site": "same-site"}).is_connected("/store"))
+
+    def test_malformed_authorization_is_refused(self):
+        """An Authorization header that is not Basic must be refused, not make the connect handler fail
+        (a failing handler leaves the connection open, and its events would then be handled)."""
+        for headers in ({"Authorization": "token junk"}, {"Authorization": "Bearer x"}, {"Authorization": "Basic !!!"}):
+            self.assertFalse(self.tab(user=None, token="", headers=headers).is_connected("/store"), headers)
+            self.assertFalse(self.tab(user=None, token=self.token(), headers=headers).is_connected("/store"), headers)
+        token = self.token()
+        with mock.patch.object(swizzin.htpasswd, "authenticate", side_effect=RuntimeError("check failed")):
+            self.assertFalse(self.tab(token=token).is_connected("/store"))  # fail closed
+        self.assertEqual(swizzin.app.extensions["store"]["authorized"], set())
+
+    def test_events_are_handled_only_for_accepted_connections(self):
+        swizzin.app.config["STORE_ASK_PASSWORD"] = False  # the worst case: installing needs no password
+        try:
+            tab = self.tab()
+            authorized = swizzin.app.extensions["store"]["authorized"]
+            self.assertEqual(len(authorized), 1)
+            authorized.clear()  # as if its connect handler had not accepted it
+            tab.emit("install", {"app": "sonarr"}, namespace="/store")
+            tab.emit("attach", {}, namespace="/store")
+            eventlet.sleep(0.5)
+            self.assertEqual([e for e in tab.get_received("/store") if e["name"] == "helper"], [])
+            self.assertEqual(swizzin.app.extensions["store"]["links"], {})  # no helper connection was opened
+        finally:
+            del swizzin.app.config["STORE_ASK_PASSWORD"]
+
+    def test_dashboard_websocket_refuses_malformed_authorization(self):
+        for headers in ({"Authorization": "token junk"}, {}):
+            tab = self.tab(user=None, token="", headers=headers, namespace="/websocket")
+            self.assertFalse(tab.is_connected("/websocket"), headers)
+        with mock.patch.object(swizzin.htpasswd, "authenticate", side_effect=RuntimeError("check failed")):
+            self.assertFalse(self.tab(namespace="/websocket").is_connected("/websocket"))  # fail closed
+        self.assertTrue(self.tab(namespace="/websocket").is_connected("/websocket"))
+
+    def test_incomplete_basic_credentials_are_refused_not_an_error(self):
+        with swizzin.app.test_request_context("/"):
+            for user, password in ((None, None), ("tester", None), (None, "tester"), (b"tester", b"tester")):
+                self.assertEqual(swizzin.htpasswd.check_basic_auth(user, password), (False, None), (user, password))
+            self.assertEqual(swizzin.htpasswd.check_basic_auth("tester", "tester"), (True, "tester"))
 
     def test_install_and_answer_a_question(self):
         tab = self.tab()

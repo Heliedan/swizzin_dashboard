@@ -147,8 +147,10 @@ class StorePage(unittest.TestCase):
         self.assertNotIn(b"store-item", r.get_data())
 
     def test_token_authentication_is_refused(self):
-        r = self.client.get("/apps", headers={"Authorization": "token abc"})
-        self.assertNotEqual(r.status_code, 200)
+        for header in ("token abc", "Bearer abc", "Basic !!!"):
+            for path in ("/apps", "/store/token"):  # refused like an anonymous visitor, not an error 500
+                r = self.client.get(path, headers={"Authorization": header})
+                self.assertIn(r.status_code, (302, 401), (path, header))
 
     def test_page_explains_when_the_helper_is_missing(self):
         swizzin.app.config["STORE_SOCKET"] = os.path.join(self.base, "missing.sock")

@@ -211,7 +211,10 @@ def register(app, socketio, htpasswd):
                          static_folder="static", static_url_path="/store/static")
     nonce = secrets.token_urlsafe(32)  # per process: after a panel restart the page simply fetches the new one
     links = {}  # Socket.IO sid -> HelperLink
-    app.extensions["store"] = {"links": links}
+    # sids whose connection the connect handler explicitly accepted: if that handler fails, python-socketio
+    # keeps the connection open and would still deliver its events, so every handler checks this set
+    authorized = set()
+    app.extensions["store"] = {"links": links, "authorized": authorized}
 
     def admin_basic(user):
         auth = flask.request.authorization
@@ -289,23 +292,38 @@ def register(app, socketio, htpasswd):
         except OSError:
             emit("helper", {"ok": False, "error": "unavailable"})
 
-    @socketio.on("connect", namespace="/store")
-    def store_connect(auth=None):
+    def connect_allowed(auth):
         is_valid, user = htpasswd.authenticate()
         site = flask.request.headers.get("Sec-Fetch-Site")
         given = auth.get("token") if isinstance(auth, dict) else None
-        if not is_valid or not admin_basic(user) or (site is not None and site != "same-origin") or \
-                not isinstance(given, str) or not hmac.compare_digest(given, nonce):
+        return bool(is_valid and admin_basic(user) and (site is None or site == "same-origin") and
+                    isinstance(given, str) and given.isascii() and hmac.compare_digest(given, nonce))
+
+    def accepted():
+        return flask.request.sid in authorized
+
+    @socketio.on("connect", namespace="/store")
+    def store_connect(auth=None):
+        try:
+            allowed = connect_allowed(auth)
+        except Exception:  # fail closed: an error here must refuse the connection
+            app.logger.exception("App Store: connection check failed")
+            allowed = False
+        if not allowed:
             return False
+        authorized.add(flask.request.sid)
 
     @socketio.on("disconnect", namespace="/store")
     def store_disconnect():
+        authorized.discard(flask.request.sid)
         current = links.pop(flask.request.sid, None)
         if current is not None:
             current.close()
 
     @socketio.on("install", namespace="/store")
     def store_install(msg):
+        if not accepted():
+            return
         msg = msg if isinstance(msg, dict) else {}
         if ask_password() and not password_ok(msg.get("password")):
             emit("helper", {"ok": False, "error": "password"})
@@ -314,6 +332,8 @@ def register(app, socketio, htpasswd):
 
     @socketio.on("attach", namespace="/store")
     def store_attach(msg):
+        if not accepted():
+            return
         msg = msg if isinstance(msg, dict) else {}
         request = {"op": "attach"}
         if isinstance(msg.get("control_key"), str):
@@ -327,10 +347,10 @@ def register(app, socketio, htpasswd):
 
     @socketio.on("input", namespace="/store")
     def store_input(msg):
-        if isinstance(msg, dict) and flask.request.sid in links:
+        if accepted() and isinstance(msg, dict) and flask.request.sid in links:
             relay({"op": "input", "data": msg.get("data")})
 
     @socketio.on("resize", namespace="/store")
     def store_resize(msg):
-        if isinstance(msg, dict) and flask.request.sid in links:
+        if accepted() and isinstance(msg, dict) and flask.request.sid in links:
             relay({"op": "resize", "rows": msg.get("rows"), "cols": msg.get("cols")})

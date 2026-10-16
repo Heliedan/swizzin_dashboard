@@ -175,6 +175,8 @@ class HtPasswdAuth:
         This function is called to check if a username /
         password combination is valid via the htpasswd file.
         """
+        if not isinstance(username, str) or not isinstance(password, str):
+            return (False, None)  # not a complete Basic login: refused, not an error
         valid = self.users.check_password(
             username, password
         )
@@ -282,7 +284,8 @@ class HtPasswdAuth:
         is_valid = False
         user = None
         credentials = None
-        if basic_auth:
+        # Werkzeug also parses other schemes ("token ...", "Bearer ..."): only Basic carries a password
+        if basic_auth and getattr(basic_auth, "type", "basic") == "basic":
             credentials = ['basic', basic_auth.username, basic_auth.password]
             is_valid, user = self.check_basic_auth(
                 basic_auth.username, basic_auth.password
@@ -301,7 +304,11 @@ class HtPasswdAuth:
                 log.debug('Received token: %s', token)
 
                 credentials = ['token', token]
-                is_valid, user = self.check_token_auth(token)
+                try:
+                    is_valid, user = self.check_token_auth(token)
+                except Exception:  # a broken token check must refuse, never fail open or crash the caller
+                    log.warning('Token authentication failed', exc_info=True)
+                    is_valid, user = False, None
         if credentials and not is_valid and self.failed_logins.failed(address, credentials):
             log.warning('Too many failed logins from %s: refused for %d minutes',
                         address, math.ceil(self.failed_logins.block_time / 60))
