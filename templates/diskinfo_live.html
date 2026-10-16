@@ -5,9 +5,6 @@
       <span>{% for mount in mounts %}<span id="{{ mount }}indicator" class="systemindicator bg-secondary ml-1" title="{{ mount }}" style="height:14px;width:14px"></span>{% endfor %}</span>
     </div>
     <div id="diskinfo" class="card-body">
-        {{macros.build_disk_info(mounts=mounts)}}
-        {% for mount in mounts %}
-        <p class="text-center small mb-0">{% if mounts|length > 1 %}{{ mount }} : {% endif %}Read <span id="{{ mount }}diskread">--</span> · Write <span id="{{ mount }}diskwrite">--</span></p>
-        {% endfor %}
+        {{macros.build_disk_info(mounts=mounts, live=True)}}
     </div>
 </div>

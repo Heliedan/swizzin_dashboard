@@ -158,7 +158,7 @@ f{% macro build_sidebar(pages, vendor) %}
 </div>
 {% endmacro %}
 
-{% macro build_disk_info(mounts) %}
+{% macro build_disk_info(mounts, live=False) %}
 <table class="table table-sm table-dark table-borderless">
     <thead class="table-active">
         <tr>
@@ -183,6 +183,11 @@ f{% macro build_sidebar(pages, vendor) %}
         <tr>
             <td colspan="4" class="text-center"><span id='{{ mount }}diskpercent'></span>%</td>
         </tr>
+        {% if live %}
+        <tr>
+            <td colspan="4" class="text-center small">Read <span id='{{ mount }}diskread'>--</span> · Write <span id='{{ mount }}diskwrite'>--</span></td>
+        </tr>
+        {% endif %}
     </tbody>
     {% if (loop.index == 3 and not loop.last) %}
       </table>
