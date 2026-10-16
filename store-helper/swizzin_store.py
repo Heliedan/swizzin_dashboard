@@ -15,7 +15,8 @@ Operations:
 
 An installation runs `box install <app>` in a pseudo-terminal, exactly as over SSH (the
 installers ask their questions on /dev/tty and draw whiptail menus), then `box test <app>`
-when the app's lock file appeared. One at a time. Whoever started it, or later took
+when the app's lock file appeared, and once more a minute later if it failed (some apps take
+a while to open their port after their first start). One at a time. Whoever started it, or later took
 control (the panel asks for the admin password first), may type in it; others only watch.
 
 Installed by store-helper/install.sh into /usr/local/lib/swizzin-store/ (root-owned),
@@ -81,6 +82,8 @@ def options(argv=None):
     p.add_argument("--allow-uid", type=int,
                    help="tests: allow this uid instead of the panel user, and leave the socket group alone")
     p.add_argument("--blocked", default=",".join(BLOCKED), help="comma-separated apps the store does not offer")
+    p.add_argument("--retest-delay", type=int, default=60,
+                   help="seconds before checking an app again when its first checks failed (0: no second check)")
     return p.parse_args(argv)
 
 
@@ -143,6 +146,8 @@ class Job:
         self.phase = "install"  # install, then test, then done
         self.result = None  # installed / failed / interrupted
         self.test = None  # passed / failed
+        self.retested = False  # the checks failed once and were run again
+        self.retest_at = None  # when to run them again (time.monotonic())
         self.generic_test = not os.path.isfile(os.path.join(opts.tests, app + ".sh"))
         self.started, self.ended = time.time(), None
         self.size = size
@@ -157,7 +162,7 @@ class Job:
 
     def summary(self):
         return {"id": self.id, "app": self.app, "phase": self.phase, "result": self.result, "test": self.test,
-                "generic_test": self.generic_test, "started": int(self.started),
+                "generic_test": self.generic_test, "retested": self.retested, "started": int(self.started),
                 "ended": int(self.ended) if self.ended else None}
 
     def replay_text(self):
@@ -446,7 +451,15 @@ class Helper:
     def _poll_job(self):
         """The phase ends when its process exits (not when the terminal closes: a daemon may keep it open)."""
         job = self.job
-        if job is None or job.phase == "done" or job.pid is None:
+        if job is None or job.phase == "done":
+            return
+        if job.retest_at is not None:
+            if time.monotonic() >= job.retest_at:
+                job.retest_at = None
+                self._broadcast({"phase": "test", "generic_test": job.generic_test})
+                self._spawn(job, [self.opts.box, "test", job.app])
+            return
+        if job.pid is None:
             return
         if job.exited_at is None:
             try:
@@ -479,6 +492,12 @@ class Helper:
             job.phase = "test"
             self._broadcast({"phase": "test", "generic_test": job.generic_test})
             self._spawn(job, [self.opts.box, "test", job.app])
+            return
+        if job.phase == "test" and job.status != 0 and not job.retested and self.opts.retest_delay > 0:
+            job.retested, job.retest_at = True, time.monotonic() + self.opts.retest_delay
+            self._output(job, ("\r\n[App Store] The checks failed. Some apps take a while to start: checking again "
+                               "in {} seconds...\r\n".format(self.opts.retest_delay)).encode())
+            self._broadcast({"phase": "retest", "seconds": self.opts.retest_delay})
             return
         if job.phase == "test":
             job.result, job.test = "installed", ("passed" if job.status == 0 else "failed")

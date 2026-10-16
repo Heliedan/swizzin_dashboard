@@ -25,6 +25,9 @@ cmd=$1; app=$2
 if [ "$cmd" = test ]; then
     echo "checking $app"
     [ "$app" = flood ] && exit 1
+    if [ "$app" = mylar ] && [ ! -e "$LOCKS/../mylar-checked" ]; then   # slow to start: fails only the first time
+        touch "$LOCKS/../mylar-checked"; exit 1
+    fi
     exit 0
 fi
 printf '\e[1;32mInstalling %s\e[0m\n' "$app"
@@ -49,7 +52,9 @@ case "$app" in
         echo "working"; sleep 30 ;;
     flood)    # installs, but its health check fails
         touch "$LOCKS/.$app.lock" ;;
-    lounge)   # a whiptail menu, like the version choice of rTorrent: the second entry installs
+    mylar)    # installs, but takes a while to start: its first health check fails
+        touch "$LOCKS/.$app.lock" ;;
+    deluge)   # a whiptail menu, like the version choice of Deluge or rTorrent: the second entry installs
         choice=$(whiptail --menu "Pick a version" 12 40 3 a Alpha b Beta c Gamma 3>&1 1>&2 2>&3)
         echo "picked $choice"; [ "$choice" = b ] && touch "$LOCKS/.$app.lock" ;;
 esac
@@ -99,7 +104,7 @@ class Conn:
 def fake_installers(base):
     """fake_swizzin() plus the fake box, its apps, health checks, home and logs; the helper's extra options."""
     fake_swizzin(base)
-    for app in ("sonarr", "radarr", "lidarr", "bazarr", "autobrr", "jackett", "flood", "medusa", "lounge"):
+    for app in ("sonarr", "radarr", "lidarr", "bazarr", "autobrr", "jackett", "flood", "medusa", "deluge", "mylar"):
         open(os.path.join(base, "scripts", app + ".sh"), "w").close()
     open(os.path.join(base, "locks", ".medusa.lock"), "w").close()
     os.makedirs(os.path.join(base, "tests"))
@@ -110,7 +115,7 @@ def fake_installers(base):
         f.write(FAKE_BOX.replace("@LOCKS@", os.path.join(base, "locks")))
     os.chmod(box, 0o755)
     return ("--box", box, "--tests", os.path.join(base, "tests"), "--home", os.path.join(base, "home"),
-            "--logs", os.path.join(base, "logs"))
+            "--logs", os.path.join(base, "logs"), "--retest-delay", "1")
 
 
 class Install(unittest.TestCase):
@@ -154,6 +159,7 @@ class Install(unittest.TestCase):
         self.assertEqual(phase, {"phase": "test", "generic_test": False})
         done = self.done(c)
         self.assertEqual((done["result"], done["test"], done["generic_test"]), ("installed", "passed", False))
+        self.assertFalse(done["retested"])  # passed the first time: checked once
         self.assertIn("size 40 120", c.output)  # the installer saw the new window size
         self.assertIn("checking sonarr", c.output)
         self.assertTrue(os.path.exists(os.path.join(self.base, "locks", ".sonarr.lock")))
@@ -178,10 +184,32 @@ class Install(unittest.TestCase):
         self.assertEqual((done["result"], done["test"]), ("failed", None))
         self.assertNotIn("checking", c.output)
 
-    def test_failed_checks(self):
+    def test_failed_checks_are_run_again_once(self):
         c, _ = self.install("flood")
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True})
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "retest", "seconds": 1})
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True})
         done = self.done(c)
-        self.assertEqual((done["result"], done["test"]), ("installed", "failed"))
+        self.assertEqual((done["result"], done["test"], done["retested"]), ("installed", "failed", True))
+        self.assertEqual(c.output.count("checking flood"), 2)
+        self.assertIn("checking again in 1 seconds", c.output)
+
+    def test_slow_app_passes_the_second_checks(self):
+        c, _ = self.install("mylar")
+        done = self.done(c)
+        self.assertEqual((done["result"], done["test"], done["retested"]), ("installed", "passed", True))
+        self.assertEqual(c.output.count("checking mylar"), 2)
+
+    def test_watcher_sees_the_second_checks(self):
+        c, _ = self.install("flood")
+        c.until(lambda m: m.get("phase") == "retest")
+        w = self.conn()
+        w.send(op="attach")
+        attached = w.until(lambda m: "attached" in m)
+        self.assertEqual(attached["attached"]["phase"], "test")  # still checking while it waits
+        w.until(lambda m: "output" in m)
+        self.assertIn("checking again", w.output)  # replayed
+        self.assertEqual(self.done(w)["test"], "failed")
 
     def test_installer_environment(self):
         c, _ = self.install("autobrr")
