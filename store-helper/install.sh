@@ -27,7 +27,21 @@ if [[ $(stat -c %U "$HERE") == swizzin || $(stat -c %U "$HERE/swizzin_store.py")
 fi
 id swizzin >/dev/null 2>&1 || { echo "No 'swizzin' user: is the Swizzin panel installed?" >&2; exit 1; }
 [[ -x /usr/bin/python3 ]] || { echo "/usr/bin/python3 is missing." >&2; exit 1; }
-[[ -x /usr/local/bin/box ]] || { echo "Swizzin's box command is missing." >&2; exit 1; }
+[[ -x /usr/local/bin/swizzin/box ]] || { echo "Swizzin's box command is missing (/usr/local/bin/swizzin/box)." >&2; exit 1; }
+
+# Restarting the helper would cut off an installation in progress.
+if [[ -S /run/swizzin-store/store.sock ]] && /usr/bin/python3 -I -c '
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect("/run/swizzin-store/store.sock")
+s.sendall(b"{\"op\": \"catalogue\"}\n"); data = b""
+while not data.endswith(b"\n"):
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+sys.exit(0 if json.loads(data).get("job") else 1)' 2>/dev/null; then
+    echo "An installation is running in the App Store: wait for it to finish, then run this again." >&2
+    exit 1
+fi
 
 install -d -o root -g root -m 0755 "$DEST"
 install -o root -g root -m 0644 "$HERE/swizzin_store.py" "$DEST/swizzin_store.py"

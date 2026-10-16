@@ -6,18 +6,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <title>{{ title }}</title>
   <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon/favicon.ico') }}">
-  {# This page will be able to install software as root: every third-party file is pinned (SRI). #}
+  {# This page installs software as root: every third-party file is pinned (SRI) or shipped with the page. #}
   <link rel="stylesheet" type="text/css" href="https://stackpath.bootstrapcdn.com/bootswatch/4.4.1/darkly/bootstrap.min.css" integrity="sha384-rCA2D+D9QXuP2TomtQwd+uP50EHjpafN+wruul0sXZzX/Da7Txn4tB9aLMZV4DZm" crossorigin="anonymous">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/swizzin.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('store.static', filename='vendor/xterm/xterm.css') }}">
   <link rel="stylesheet" type="text/css" href="{{ url_for('store.static', filename='store.css') }}">
 </head>
 <body>
 <div class="d-flex" id="wrapper">
   {{ macros.build_sidebar(pages=pages, vendor=vendor) }}
   {{ macros.build_nav(user=user, apps=pages) }}
-  <div class="container-fluid store">
+  <div class="container-fluid store" data-urlbase="{{ config.URLBASE }}" data-ready="{{ 'no' if error else 'yes' }}" data-job='{{ job|tojson }}'>
     <h4 class="mb-1">App Store</h4>
-    <p class="text-muted store-intro">Every application Swizzin can install, and which ones are already on this server. Installing from this page comes in the next version: for now, run <code>sudo box install &lt;name&gt;</code> over SSH.</p>
+    <p class="text-muted store-intro">Every application Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal.</p>
 
     {% if error %}
     <div class="alert alert-warning" role="alert">
@@ -29,6 +30,10 @@
       {% endif %}
     </div>
     {% else %}
+    <div id="store-banner" class="alert alert-info d-flex flex-wrap align-items-center" role="status" hidden>
+      <span class="mr-3">Installation of <strong id="store-banner-app"></strong> in progress.</span>
+      <button type="button" class="btn btn-sm btn-light" id="store-banner-show">Show the terminal</button>
+    </div>
     <div class="store-toolbar d-flex flex-wrap align-items-center">
       <input type="search" id="store-search" class="form-control mr-2 mb-2" placeholder="Search" aria-label="Search applications" autocomplete="off">
       <div class="btn-group mb-2" role="group" aria-label="Show">
@@ -43,7 +48,7 @@
       <h5 class="store-heading">{{ heading }} <span class="badge badge-secondary store-count">{{ sections[key]|length }}</span></h5>
       <div class="row">
         {% for e in sections[key] %}
-        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}">
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}">
           <div class="card h-100 store-card{{ ' installed' if e.installed }}">
             <div class="card-body">
               <div class="d-flex align-items-center mb-2">
@@ -66,7 +71,7 @@
               <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Install</button>
               <small class="text-muted ml-1">Requires {{ e.missing|join(", ") }}</small>
               {% else %}
-              <button type="button" class="btn btn-sm btn-primary" disabled title="Installing from the panel comes in the next version">Install</button>
+              <button type="button" class="btn btn-sm btn-primary store-install" data-app="{{ e.name }}" data-pretty="{{ e.pretty }}">Install</button>
               {% endif %}
               {% if e.conflicts and not e.installed %}
               <small class="text-warning d-block mt-1">The installer will offer to disable {{ e.conflicts|join(", ") }}.</small>
@@ -79,12 +84,75 @@
     </section>
     {% endfor %}
     <p id="store-empty" class="text-muted" hidden>No application matches.</p>
+
+    <div class="modal fade" id="store-confirm" tabindex="-1" role="dialog" aria-labelledby="store-confirm-title" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <form class="modal-content" id="store-confirm-form" autocomplete="off">
+          <div class="modal-header">
+            <h5 class="modal-title" id="store-confirm-title">Install <span id="store-confirm-app"></span>?</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Cancel"><span aria-hidden="true">&times;</span></button>
+          </div>
+          <div class="modal-body">
+            <p>This runs <code id="store-confirm-command"></code> on the server as root, like over SSH. Some installations take several minutes, and the installer may ask you questions in the terminal. Closing the terminal window does not stop the installation.</p>
+            <label for="store-confirm-password">Your panel password, to confirm</label>
+            <input type="password" class="form-control" id="store-confirm-password" autocomplete="current-password" required>
+            <small class="text-danger d-block mt-2" id="store-confirm-error" role="alert"></small>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="store-confirm-go">Install</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal fade" id="store-terminal" tabindex="-1" role="dialog" aria-labelledby="store-terminal-title" aria-hidden="true" data-backdrop="static">
+      <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="store-terminal-title"></h5>
+            <span class="badge badge-info ml-3 align-self-center" id="store-terminal-status"></span>
+          </div>
+          <div class="modal-body p-0">
+            <div id="store-term" class="store-term"></div>
+            <p class="store-note text-muted mb-0" id="store-terminal-note"></p>
+          </div>
+          <div class="modal-footer justify-content-between">
+            <div class="d-flex flex-wrap align-items-center">
+              <div class="btn-group btn-group-sm mr-2 mb-1" id="store-keys" role="group" aria-label="Keys">
+                <button type="button" class="btn btn-outline-light" data-key="up" aria-label="Up arrow">&uarr;</button>
+                <button type="button" class="btn btn-outline-light" data-key="down" aria-label="Down arrow">&darr;</button>
+                <button type="button" class="btn btn-outline-light" data-key="left" aria-label="Left arrow">&larr;</button>
+                <button type="button" class="btn btn-outline-light" data-key="right" aria-label="Right arrow">&rarr;</button>
+                <button type="button" class="btn btn-outline-light" data-key="tab">Tab</button>
+                <button type="button" class="btn btn-outline-light" data-key="enter">Enter</button>
+                <button type="button" class="btn btn-outline-light" data-key="esc">Esc</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-warning mr-2 mb-1" id="store-ctrl-c" title="Interrupts the installation, like Ctrl+C over SSH">Ctrl+C</button>
+              <button type="button" class="btn btn-sm btn-outline-light mr-2" id="store-take">Take control</button>
+              <form class="form-inline" id="store-take-form" autocomplete="off" hidden>
+                <input type="password" class="form-control form-control-sm mr-2" id="store-take-password" placeholder="Panel password" aria-label="Panel password" autocomplete="current-password">
+                <button type="submit" class="btn btn-sm btn-primary">Take control</button>
+              </form>
+              <small class="text-danger ml-2" id="store-terminal-error" role="alert"></small>
+            </div>
+            <div>
+              <button type="button" class="btn btn-sm btn-success" id="store-reload" hidden>Reload the page</button>
+              <button type="button" class="btn btn-sm btn-secondary" id="store-close">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     {% endif %}
   </div>
 </div>
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.bundle.min.js" integrity="sha384-6khuMg9gaYr5AxOqhkVIODVIvm9ynTT5J4V1cfthmT+emCG6yVmEZsRHdxlotUnm" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.4/socket.io.js" integrity="sha384-JUh3U/xjnOlL/7MKh/FzORuvdTxBZuZJUFfG3A51H4GkBkXlS38nZh1jqXd2ElYN" crossorigin="anonymous"></script>
+<script src="{{ url_for('store.static', filename='vendor/xterm/xterm.js') }}"></script>
+<script src="{{ url_for('store.static', filename='vendor/xterm/addon-fit.js') }}"></script>
 <script src="{{ url_for('static', filename='js/swizzin.js') }}"></script>
 <script src="{{ url_for('store.static', filename='store.js') }}"></script>
 </body>

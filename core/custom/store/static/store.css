@@ -19,3 +19,8 @@
 }
 .store-foot { background-color: transparent; border-top: 1px solid rgba(255, 255, 255, .06); }
 .store-foot code { font-size: .8rem; overflow-wrap: anywhere; }  /* breaks at spaces first */
+.store-term { height: 60vh; min-height: 260px; padding: .5rem; background-color: #1e1e1e; }
+.store-note:not(:empty) { padding: .5rem 1rem; }
+.store-term .xterm-viewport { scrollbar-color: #555 #1e1e1e; }  /* not a white bar on the dark terminal */
+.store-term .xterm-viewport::-webkit-scrollbar { width: 10px; background-color: #1e1e1e; }
+.store-term .xterm-viewport::-webkit-scrollbar-thumb { background-color: #555; border-radius: 5px; }

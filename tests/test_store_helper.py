@@ -5,6 +5,7 @@ Run from the repository root: python tests/test_store_helper.py
 import json
 import os
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -32,13 +33,19 @@ def fake_swizzin(base):
 
 
 class Helper:
-    def __init__(self, base, allow_uid=None, extra=()):
+    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False):
         self.path = os.path.join(base, "store.sock")
         uid = os.getuid() if allow_uid is None else allow_uid
+        try:
+            os.unlink(self.path)  # a previous helper's socket must not be mistaken for this one's
+        except FileNotFoundError:
+            pass
         self.proc = subprocess.Popen(
             [sys.executable, "-I", "-B", HELPER, "--socket", self.path, "--scripts", os.path.join(base, "scripts"),
              "--lang", os.path.join(base, "lang_en"), "--locks", os.path.join(base, "locks"),
-             "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+             "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            # like a background job of a shell script: SIGINT ignored, inherited by everything it starts
+            preexec_fn=(lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)) if ignore_sigint else None)
         for _ in range(100):
             if os.path.exists(self.path):
                 break
@@ -105,7 +112,7 @@ class StoreHelper(unittest.TestCase):
 
     def test_bad_requests_are_answered_and_the_connection_stays_usable(self):
         with self.helper.connect() as s:
-            for raw in (b"not json\n", b"[1, 2]\n", b'{"op": "install", "app": "sonarr"}\n', b'{"op": "rm -rf /"}\n'):
+            for raw in (b"not json\n", b"[1, 2]\n", b'{"op": "shell", "cmd": "id"}\n', b'{"op": "rm -rf /"}\n'):
                 self.assertEqual(ask(s, raw), {"ok": False, "error": "bad-request"})
             self.assertTrue(ask(s, b'{"op": "catalogue"}\n')["ok"])
 
