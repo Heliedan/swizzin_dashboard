@@ -37,7 +37,8 @@ http.send("");
     if (http.status == 200) {
         document.location = url;
     } else if (http.status == 429) {
-        alert("You have been rate limited! Please try again in 1 minute.");
+        var minutes = Math.ceil(parseInt(http.getResponseHeader("Retry-After"), 10) / 60) || 1;
+        alert("Too many login attempts! Please try again in " + minutes + (minutes == 1 ? " minute." : " minutes."));
     } else {
         alert("Incorrect username and/or password!");
     }
