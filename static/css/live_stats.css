@@ -23,7 +23,7 @@
   .live-layout > .card:last-child    { grid-column: 3; grid-row: 1 / 5; } /* Network Info (dernière carte) */
 }
 /* Disque illisible (débranché, partage réseau perdu...) : symbole ⊘ gris barré, sans couleur, car les couleurs
-   des pastilles indiquent le remplissage. Le badge « INDISPONIBLE » de la ligne donne l'explication en clair. */
+   des pastilles indiquent le remplissage. Le badge « UNAVAILABLE » de la ligne donne l'explication en clair. */
 .systemindicator.disk-unavailable { background-color: transparent !important; border: 2px solid #999; box-sizing: border-box; position: relative; display: inline-block; }
 .systemindicator.disk-unavailable::after { content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: #999; transform: rotate(45deg); }
 /* Carte Disk Info en direct : un encart léger par disque (contour fin), sans changer le tableau d'origine.

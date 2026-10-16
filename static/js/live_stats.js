@@ -83,7 +83,7 @@
     var ri = document.getElementById('ramindicator'); if (ri) { ri.title = 'RAM : ' + r.perutil + ' %'; }
   }
 
-  function etatDisque(m, indisponible) {  // badge « INDISPONIBLE » à côté du nom du disque, ligne du % masquée
+  function etatDisque(m, indisponible) {  // badge « UNAVAILABLE » au-dessus du nom du disque, ligne du % masquée
     var cell = document.getElementById(m + 'diskused');
     var nom = cell && cell.parentElement ? cell.parentElement.firstElementChild : null;
     var badge = nom ? nom.querySelector('.disk-badge') : null;
@@ -92,7 +92,7 @@
       badge.className = 'disk-badge mb-1';
       var etiquette = document.createElement('span');
       etiquette.className = 'badge badge-danger';
-      etiquette.textContent = 'INDISPONIBLE';
+      etiquette.textContent = 'UNAVAILABLE';
       badge.appendChild(etiquette);
       nom.insertBefore(badge, nom.firstChild);
     }
@@ -123,7 +123,7 @@
         etatDisque(m, true);
         // Les pastilles disent le remplissage : un disque illisible n'a pas de couleur mais le symbole ⊘ (gris barré).
         var p = document.getElementById(m + 'indicator');
-        if (p) { p.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary'); p.classList.add('disk-unavailable'); p.title = m + ' : indisponible'; }
+        if (p) { p.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary'); p.classList.add('disk-unavailable'); p.title = m + ' : unavailable'; }
         return;
       }
       etatDisque(m, false);
