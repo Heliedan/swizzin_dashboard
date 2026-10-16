@@ -59,9 +59,11 @@ KEEP_LOGS = 20
 # (Swizzin adds /usr/local/bin/swizzin in .bashrc). TERM is required: without
 # it Swizzin's messages lose their text. NEEDRESTART_SUSPEND: apt must not restart services
 # (this one included) in the middle of an installation.
+# PAGER, SYSTEMD_PAGER, LESSSECURE: no interactive pager (which can run commands) opens in the terminal.
 JOB_ENV = {"HOME": "/root", "USER": "root", "LOGNAME": "root", "SHELL": "/bin/bash", "TERM": "xterm-256color",
            "LANG": "C.UTF-8", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin/swizzin",
-           "GIT_TERMINAL_PROMPT": "0", "NEEDRESTART_SUSPEND": "1"}
+           "GIT_TERMINAL_PROMPT": "0", "NEEDRESTART_SUSPEND": "1", "PAGER": "cat", "SYSTEMD_PAGER": "cat",
+           "LESSSECURE": "1"}
 
 log = logging.getLogger("swizzin-store")
 
@@ -122,14 +124,15 @@ def window(msg):
     """Terminal size asked by the browser, kept within sane bounds."""
     try:
         rows, cols = int(msg.get("rows", 30)), int(msg.get("cols", 100))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: infinity (JSON allows 1e400)
         rows, cols = 30, 100
     return min(max(rows, 10), 200), min(max(cols, 40), 400)
 
 
 class Client:
-    def __init__(self, sock):
+    def __init__(self, sock, uid):
         self.sock = sock
+        self.uid = uid
         self.inbuf = bytearray()
         self.out = bytearray()
         self.closed = False
@@ -156,8 +159,12 @@ class Job:
         self.replay, self.replay_len, self.trimmed = [], 0, False
         self.typed = 0
         self.controller = None
-        self.log = os.fdopen(os.open(os.path.join(opts.logs, self.id + ".log"),
-                                     os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab", buffering=0)
+        try:
+            self.log = os.fdopen(os.open(os.path.join(opts.logs, self.id + ".log"),
+                                         os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab", buffering=0)
+        except OSError as e:  # the log is a help, never a reason to refuse or stop an installation
+            log.warning("no log for this installation: %s", e)
+            self.log = None
         self.logged = 0
 
     def summary(self):
@@ -234,12 +241,13 @@ class Helper:
         except BlockingIOError:
             return
         uid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
-        if uid not in self.allowed or len(self.clients) >= MAX_CLIENTS:
+        panel_clients = sum(1 for other in self.clients.values() if other.uid != 0)  # root (install.sh) always gets in
+        if uid not in self.allowed or (uid != 0 and panel_clients >= MAX_CLIENTS):
             log.warning("connection refused (uid %d, %d clients)", uid, len(self.clients))
             sock.close()
             return
         sock.setblocking(False)
-        c = Client(sock)
+        c = Client(sock, uid)
         self.clients[sock] = c
         self.sel.register(sock, selectors.EVENT_READ, c)
 
@@ -267,15 +275,19 @@ class Helper:
         if len(line) <= MAX_LINE:
             try:
                 msg = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):  # RecursionError: deeply nested arrays
                 pass
         op = msg.get("op") if isinstance(msg, dict) else None
         handler = {"catalogue": self._op_catalogue, "install": self._op_install, "attach": self._op_attach,
-                   "input": self._op_input, "resize": self._op_resize}.get(op)
+                   "input": self._op_input, "resize": self._op_resize}.get(op) if isinstance(op, str) else None
         if handler is None:
             self._send(c, {"ok": False, "error": "bad-request"})
-        else:
+            return
+        try:
             handler(c, msg)
+        except Exception:  # no request may stop the service, and with it the installation in progress
+            log.exception("request %s failed", op)
+            self._send(c, {"ok": False, "error": "bad-request"})
 
     def _send(self, c, obj):
         if c.closed:
@@ -344,6 +356,8 @@ class Helper:
         if error:
             self._send(c, {"ok": False, "error": error})
             return
+        for other in self.clients.values():  # the tabs that followed the previous installation do not follow this one
+            other.attached = False
         self.job = job = Job(self.opts, app, window(msg))
         job.controller, c.attached = c, True
         self._save(job)
@@ -357,9 +371,15 @@ class Helper:
             self._send(c, {"ok": False, "error": "no-job"})
             return
         key = msg.get("control_key")
-        if job.phase != "done" and (msg.get("take") is True or
-                                    (isinstance(key, str) and secrets.compare_digest(key, job.key))):
-            job.controller = c  # take: the panel checked the admin password first
+        take = msg.get("take") is True  # the panel checked the admin password first (unless turned off)
+        if job.phase != "done" and (take or (isinstance(key, str) and
+                                             secrets.compare_digest(key.encode(), job.key.encode()))):
+            previous = job.controller
+            if previous is not None and previous is not c:
+                self._send(previous, {"control": "lost"})
+                if take:  # and its key with it: it cannot take control back silently
+                    job.key = secrets.token_urlsafe(24)
+            job.controller = c
         c.attached = True
         reply = {"ok": True, "attached": job.summary(), "controller": job.controller is c}
         if job.controller is c:
@@ -371,9 +391,11 @@ class Helper:
 
     def _op_input(self, c, msg):
         job, data = self.job, msg.get("data")
-        if job is None or job.controller is not c or job.fd is None:
+        if job is None or job.controller is not c:
             self._send(c, {"ok": False, "error": "not-controller"})
             return
+        if job.fd is None:
+            return  # between two phases, or finished: no installer to type into
         if not isinstance(data, str) or len(data) > MAX_INPUT:
             self._send(c, {"ok": False, "error": "invalid"})
             return
@@ -428,9 +450,14 @@ class Helper:
             self._close_pty(job)
 
     def _output(self, job, data):
-        if job.logged < MAX_LOG:
-            job.log.write(data[:MAX_LOG - job.logged])
-            job.logged += len(data)
+        if job.log is not None and job.logged < MAX_LOG:
+            try:
+                job.log.write(data[:MAX_LOG - job.logged])
+                job.logged += len(data)
+            except OSError as e:  # a full disk: the installation goes on, without its log
+                log.warning("job %s: log stopped: %s", job.id, e)
+                job.log.close()
+                job.log = None
         text = job.decoder.decode(data)
         if not text:
             return
@@ -511,7 +538,8 @@ class Helper:
         self._save(job)
         self.last = job.summary()
         self._broadcast({"done": job.summary()})
-        job.log.close()
+        if job.log is not None:
+            job.log.close()
         self._prune_logs()
 
     def interrupt(self):
@@ -530,10 +558,13 @@ class Helper:
 
     def _save(self, job):
         path = os.path.join(self.opts.logs, job.id + ".json")
-        fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(job.summary(), f)
-        os.replace(path + ".tmp", path)
+        try:
+            fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(job.summary(), f)
+            os.replace(path + ".tmp", path)
+        except OSError as e:  # a full disk: the summary is lost, the installation is not
+            log.warning("job %s: summary not saved: %s", job.id, e)
 
     def _recover(self):
         """Last installation of a previous run; one cut off by a stop or a crash is marked interrupted."""

@@ -217,7 +217,8 @@ class Install(unittest.TestCase):
         env = dict(line[4:].split("=", 1) for line in c.output.splitlines() if line.startswith("ENV "))
         self.assertEqual(set(env) - {"PWD", "SHLVL", "_"},
                          {"HOME", "USER", "LOGNAME", "SHELL", "TERM", "LANG", "PATH", "GIT_TERMINAL_PROMPT",
-                          "NEEDRESTART_SUSPEND"})  # nothing from the client or from the helper's own environment
+                          "NEEDRESTART_SUSPEND", "PAGER", "SYSTEMD_PAGER", "LESSSECURE"})  # nothing from the client or the helper
+        self.assertEqual((env["PAGER"], env["SYSTEMD_PAGER"], env["LESSSECURE"]), ("cat", "cat", "1"))  # no pager to escape from
         self.assertEqual((env["HOME"], env["USER"], env["TERM"]), ("/root", "root", "xterm-256color"))
         self.assertIn("PWD=" + self.home, c.output)
         with open(os.path.join(self.base, "fds.txt")) as f:
@@ -273,6 +274,78 @@ class Install(unittest.TestCase):
         self.assertTrue(b.until(lambda m: "attached" in m)["controller"])
         b.send(op="input", data="y\r")
         self.assertEqual(self.done(b)["result"], "installed")
+
+    def test_malformed_requests_do_not_stop_the_service(self):
+        c = self.conn()  # an absurd window size with no installation running: the default size is used
+        c.send(op="install", app="sonarr", rows=float("inf"), cols=float("nan"))
+        started = c.until(lambda m: "ok" in m)
+        self.assertTrue(started["ok"], started)
+        c.wait_output("Continue? (y/n)")
+        self.assertIn("size 30 100", c.output)
+        c.s.sendall(b'{"op": "resize", "rows": 1e400, "cols": -1e400}\n')  # from the controller
+        for raw in (b'{"op": ["install"]}\n', b'{"op": {"x": 1}}\n', b'{"op": "attach", "control_key": "\\u00e9t\\u00e9"}\n',
+                    b"[" * 60000 + b"\n", b'{"op": "install", "app": "radarr", "rows": "x"}\n'):
+            other = self.conn()
+            other.s.sendall(raw)
+            try:
+                reply = other.recv(5)
+            except (ConnectionError, OSError):
+                reply = None  # dropped: acceptable, as long as the service keeps running
+            self.assertIsNone(self.helper.proc.poll(), raw[:40])
+            if reply is not None and "attached" not in reply:
+                self.assertFalse(reply.get("ok"), raw[:40])
+        c.send(op="input", data="y\r")
+        self.assertEqual(self.done(c)["result"], "installed")  # the installation went on to the end
+        self.assertIsNone(self.helper.proc.poll())
+
+    def test_a_full_disk_does_not_stop_the_installation(self):
+        base = tempfile.mkdtemp()
+        helper = Helper(base, extra=fake_installers(base), max_file_size=200)  # its log cannot grow past 200 bytes
+        try:
+            c = Conn(helper.path)
+            c.send(op="install", app="autobrr")  # prints a few kilobytes
+            c.until(lambda m: "ok" in m)
+            done = c.until(lambda m: "done" in m)["done"]
+            self.assertEqual(done["result"], "failed")  # autobrr's normal outcome: the helper did not crash
+            self.assertIn("ENV PATH=", c.output)  # the terminal got everything, only the log was cut
+            self.assertIsNone(helper.proc.poll())
+            c.close()
+        finally:
+            helper.stop()
+            subprocess.run(["pkill", "-f", base], stderr=subprocess.DEVNULL)
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_a_new_installation_is_not_sent_to_old_tabs(self):
+        a, _ = self.install("lidarr")
+        self.done(a)
+        b, _ = self.install("autobrr")
+        self.done(b)
+        with self.assertRaises(socket.timeout):  # tab A only follows its own installation
+            a.recv(timeout=1)
+
+    def test_taking_control_changes_the_key_and_tells_the_old_controller(self):
+        a, started = self.install("sonarr")
+        a.wait_output("Continue? (y/n)")
+        w = self.conn()
+        w.send(op="attach", take=True)
+        taken = w.until(lambda m: "attached" in m)
+        self.assertTrue(taken["controller"])
+        self.assertNotEqual(taken["control_key"], started["control_key"])  # the old key no longer gives control
+        self.assertEqual(a.until(lambda m: "control" in m), {"control": "lost"})
+        a.send(op="input", data="y\r")
+        self.assertEqual(a.until(lambda m: "error" in m)["error"], "not-controller")
+        r = self.conn()
+        r.send(op="attach", control_key=started["control_key"])
+        self.assertFalse(r.until(lambda m: "attached" in m)["controller"])
+        w.send(op="input", data="y\r")
+        self.assertEqual(self.done(w)["result"], "installed")
+
+    def test_typing_while_no_installer_runs_is_ignored(self):
+        c, _ = self.install("flood")  # its checks fail: one second without a terminal before the second check
+        c.until(lambda m: m.get("phase") == "retest")
+        c.send(op="input", data="x")
+        msg = c.until(lambda m: "done" in m or "error" in m)
+        self.assertIn("done", msg)  # no "not-controller": the controller still controls the job
 
     def test_split_accented_letter(self):
         c, _ = self.install("lidarr")

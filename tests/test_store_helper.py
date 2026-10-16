@@ -5,6 +5,7 @@ Run from the repository root: python tests/test_store_helper.py
 import json
 import os
 import shutil
+import resource
 import signal
 import socket
 import stat
@@ -33,7 +34,7 @@ def fake_swizzin(base):
 
 
 class Helper:
-    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False):
+    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False, max_file_size=None):
         self.path = os.path.join(base, "store.sock")
         uid = os.getuid() if allow_uid is None else allow_uid
         try:
@@ -44,12 +45,18 @@ class Helper:
             [sys.executable, "-I", "-B", HELPER, "--socket", self.path, "--scripts", os.path.join(base, "scripts"),
              "--lang", os.path.join(base, "lang_en"), "--locks", os.path.join(base, "locks"),
              "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-            # like a background job of a shell script: SIGINT ignored, inherited by everything it starts
-            preexec_fn=(lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)) if ignore_sigint else None)
+            preexec_fn=lambda: self._limits(ignore_sigint, max_file_size))
         for _ in range(100):
             if os.path.exists(self.path):
                 break
             time.sleep(0.05)
+
+    @staticmethod
+    def _limits(ignore_sigint, max_file_size):
+        if ignore_sigint:  # like a background job of a shell script: SIGINT ignored, inherited by everything it starts
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if max_file_size:  # a full disk: writing past this size fails (EFBIG, as ENOSPC would)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (max_file_size, max_file_size))
 
     def connect(self):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
