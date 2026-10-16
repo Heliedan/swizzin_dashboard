@@ -1,0 +1,13 @@
+{# 2026-10-09 : copie de diskinfo.html avec la pastille d'« At a Glance » dans l'en-tête et les débits lecture/écriture ;
+   actualisée chaque seconde par static/js/live_stats.js. #}
+<div class="card border-dark mt-3" id="carte-disque">
+    <div class="card-header d-flex justify-content-between align-items-center">Disk Info
+      <span>{% for mount in mounts %}<span id="{{ mount }}indicator" class="systemindicator bg-secondary ml-1" title="{{ mount }}" style="height:14px;width:14px"></span>{% endfor %}</span>
+    </div>
+    <div id="diskinfo" class="card-body">
+        {{macros.build_disk_info(mounts=mounts)}}
+        {% for mount in mounts %}
+        <p class="text-center small mb-0">{% if mounts|length > 1 %}{{ mount }} : {% endif %}Read <span id="{{ mount }}diskread">--</span> · Write <span id="{{ mount }}diskwrite">--</span></p>
+        {% endfor %}
+    </div>
+</div>

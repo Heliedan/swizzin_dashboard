@@ -1,0 +1,24 @@
+/* 2026-10-09 : mise en page du tableau de bord avec les cartes en direct (voir le README).
+   Le bloc CPU Info → RAM Info → Disk Info reste groupé dans les mises en page à 1 ou 2 colonnes (card-columns d'origine). */
+.card-columns > .live-stack {
+  display: inline-block;
+  width: 100%;
+}
+
+/* Grand écran (3 colonnes, à partir de 1400 px comme dans swizzin.css) : CPU Info à gauche, RAM Info + Disk Info +
+   Service Info au milieu, Network Info à droite, pour que tout tienne sans faire défiler. */
+@media (min-width: 1400px) {
+  .card-columns.live-layout {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto auto 1fr;   /* la ligne « 1fr » absorbe la hauteur des colonnes 1 et 3 */
+    column-gap: 1.25rem;                       /* même écart que card-columns */
+    align-items: start;
+  }
+  .card-columns.live-layout > .live-stack { display: contents; }
+  .live-layout #carte-cpu    { grid-column: 1; grid-row: 1 / 5; }
+  .live-layout #carte-ram    { grid-column: 2; grid-row: 1; }
+  .live-layout #carte-disque { grid-column: 2; grid-row: 2; }
+  .live-layout > .live-stack + .card { grid-column: 2; grid-row: 3; }   /* Service Info (carte qui suit le bloc) */
+  .live-layout > .card:last-child    { grid-column: 3; grid-row: 1 / 5; } /* Network Info (dernière carte) */
+}

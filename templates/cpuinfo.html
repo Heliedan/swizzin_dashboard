@@ -1,0 +1,47 @@
+{# 2026-10-09 : carte CPU Info en direct. Remplace « System Info » et reprend l'uptime d'« At a Glance » (charge moyenne et top des programmes retirés le 2026-10-09).
+   Mise à jour chaque seconde par static/js/live_stats.js (événement « live ») ; voir le README. #}
+<div class="card border-dark mt-3" id="carte-cpu">
+    <div class="card-header d-flex justify-content-between align-items-center">CPU Info <span id="cpuindicator" class="systemindicator bg-secondary" style="height:14px;width:14px"></span></div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col">
+              <h5 class="text-center">Used</h5>
+              <p class="text-center"><span id="cpuused">--</span>%</p>
+            </div>
+            <div class="col">
+              <h5 class="text-center">Idle</h5>
+              <p class="text-center"><span id="cpuidle">--</span>%</p>
+            </div>
+            <div class="col">
+              <h5 class="text-center">Cores</h5>
+              <p class="text-center"><span id="cpucores">--</span></p>
+            </div>
+        </div>
+        <div class="progress">
+          <div id="cpuprogress" class="progress-bar bg-success" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+        <p class="text-center">CPU utilization is at <span id="cpupercent">--</span>%</p>
+        <p class="text-center text-muted small" id="cpumodel"></p>
+
+        <h6 class="mt-3">Per core</h6>
+        <div id="cpupercore"></div>
+
+        <h6 class="mt-3">Breakdown</h6>
+        <div class="row text-center small">
+          <div class="col">User<br><span id="cpuuser">--</span>%</div>
+          <div class="col">System<br><span id="cpusystem">--</span>%</div>
+          <div class="col">I/O wait<br><span id="cpuiowait">--</span>%</div>
+          <div class="col">Steal<br><span id="cpusteal">--</span>%</div>
+        </div>
+
+        <h6 class="mt-3">Uptime</h6>
+        <div class="countup" id="uptime">
+          <p class="mb-0">
+            <span class="days">00</span> <span class="timeRefDays">days</span>
+            <span class="hours">00</span> <span class="timeRefHours">hours</span>
+            <span class="minutes">00</span> <span class="timeRefMinutes">minutes</span>
+            <span class="seconds">00</span> <span class="timeRefSeconds">seconds</span>
+          </p>
+        </div>
+    </div>
+</div>

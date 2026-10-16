@@ -62,12 +62,15 @@ if app.config['RATELIMIT_ENABLED'] == True:
     )
 
 from core.util import *
+from core.custom.live_stats import live_stats  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
 
 #Prepare the background threads
 thread = None
 thread_lock = Lock()
 thread2 = None
 thread2_lock = Lock()
+thread3 = None  # live_stats
+thread3_lock = Lock()
 
 
 #Background thread functions
@@ -202,6 +205,7 @@ def index(user):
 def socket_connect():
     global thread
     global thread2
+    global thread3
     # The HTTP routes are protected by @htpasswd.required, but this handler was not:
     # anyone able to reach the panel could open the websocket and receive the live
     # broadcasts (network speed, iowait). Refuse clients that are not logged in.
@@ -214,6 +218,9 @@ def socket_connect():
     with thread2_lock:
         if thread2 is None:
             thread2 = socketio.start_background_task(io_wait, (flask.current_app._get_current_object()))
+    with thread3_lock:
+        if thread3 is None:
+            thread3 = socketio.start_background_task(live_stats, flask.current_app._get_current_object(), socketio)
     emit('my_response', {'data': 'Connected', 'count': 0})
 
 @app.route('/stats')
