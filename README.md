@@ -4,6 +4,12 @@
 > It is **not official** and not endorsed by the Swizzin team. Feel free to look at it or try it, at your own risk, with no promise of support.
 > The original README follows further down.
 
+![Dashboard with the live CPU, RAM, network and disk cards](docs/screenshots/dashboard.png)
+
+<img src="docs/screenshots/disk-info.png" alt="Disk Info card: one box per disk, an unreadable or unmounted disk marked UNAVAILABLE" width="360">
+
+*Screenshots made with demo data: the dashboard with the live cards, then the Disk Info card, one box per disk, with a disk that went away shown as UNAVAILABLE.*
+
 ### What is different from upstream (`master`, b2eca76)
 
 | Change | Proposed upstream |
