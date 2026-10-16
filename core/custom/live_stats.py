@@ -41,6 +41,7 @@ def _peripheriques():
     with open('/proc/mounts') as f:
         for ligne in f:
             dev, mnt = ligne.split()[:2]
+            mnt = util.unescape_mount(mnt)
             if mnt in montages and dev.startswith('/dev/'):
                 out[mnt] = os.path.basename(os.path.realpath(dev))
     return out
@@ -91,7 +92,10 @@ def mesure(avant, apres, duree, modele, freq, devs):
     f = '{0:.1f}'.format
     disques = {}
     for mnt, dev in devs.items():
-        taille, utilise, libre, pct = util.disk_usage(mnt)
+        try:
+            taille, utilise, libre, pct = util.disk_usage(mnt)
+        except OSError:
+            continue  # un montage illisible ne doit pas figer les cartes CPU et RAM
         lu, ecrit = (b - a for a, b in zip(disq_a.get(dev, (0, 0)), disq_b.get(dev, (0, 0))))
         disques[mnt] = {"disktotal": taille, "diskused": utilise, "diskfree": libre, "perutil": pct,
                         "read": util.GetHumanReadableBi(lu * 512 / duree) + "/s",

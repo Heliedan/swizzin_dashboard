@@ -53,6 +53,10 @@ def get_default_interface():
                 continue
             return fields[0]
 
+def unescape_mount(path):
+    """/proc/mounts and /etc/fstab write a space in a path as \\040 (octal escapes): return the real path."""
+    return re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), path)
+
 def get_mounts():
     mounts = set()
     with open("/proc/mounts") as mount:
@@ -62,15 +66,15 @@ def get_mounts():
                 if ("boot" in fields[1]) or ("fuse" in fields) or ("/snap/" in fields[1]) or ("/loop" in fields[0]) or ("/docker" in fields[1]):
                     continue
                 else:
-                    mounts.add(fields[1])
+                    mounts.add(unescape_mount(fields[1]))
             if fields[2] == "zfs":
-                mounts.add(fields[1])
+                mounts.add(unescape_mount(fields[1]))
     with open("/etc/fstab") as fstab:
         for line in fstab:
             fields = line.strip().split()
             if "bind" in str(fields):
                 try:
-                    mounts.remove(fields[1])
+                    mounts.remove(unescape_mount(fields[1]))
                 except:
                     pass
     return sorted(mounts)
@@ -257,7 +261,7 @@ def disk_usage(location):
         totalh = GetHumanReadableBi(total)
         usedh = GetHumanReadableBi(used)
         freeh = GetHumanReadableBi(free)
-    usage = '{0:.2f}'.format((used / total * 100))
+    usage = '{0:.2f}'.format((used / total * 100) if total else 0)
     return totalh, usedh, freeh, usage
 
 def quota_usage(username):

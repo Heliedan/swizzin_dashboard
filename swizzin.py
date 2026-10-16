@@ -379,7 +379,12 @@ def disk_free(user):
     mounts = get_mounts()
     data = {}
     for mount in mounts:
-        total, used, free, usage = disk_usage(mount)
+        try:
+            total, used, free, usage = disk_usage(mount)
+        except OSError as e:
+            # One unreadable mount (removed disk, stale network share...) must not hide the others.
+            app.logger.warning("disk stats: skipping %s (%s)", mount, e)
+            continue
         data[mount] = {"disktotal": total, "diskused": used, "diskfree": free, "perutil": usage}
     return flask.jsonify(data)
 
