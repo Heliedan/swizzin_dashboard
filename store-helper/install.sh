@@ -11,6 +11,28 @@ NEEDRESTART=/etc/needrestart/conf.d/swizzin-store.conf
 
 [[ $EUID -eq 0 ]] || { echo "Run this as root (sudo)." >&2; exit 1; }
 
+# Restarting or removing the helper would cut off an installation in progress: go on only if the running
+# helper clearly says that none is running (any doubt refuses).
+if systemctl is-active --quiet swizzin-store; then
+    state=$(/usr/bin/python3 -I -c '
+import json, socket
+s = socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect("/run/swizzin-store/store.sock")
+s.sendall(b"{\"op\": \"catalogue\"}\n"); data = b""
+while not data.endswith(b"\n"):
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+print("idle" if json.loads(data).get("job") is None else "busy")' 2>/dev/null || true)
+    if [[ $state == busy ]]; then
+        echo "An installation is running in the App Store: wait for it to finish, then run this again." >&2
+        exit 1
+    elif [[ $state != idle ]]; then
+        echo "Could not ask the App Store helper whether an installation is running. Try again in a minute," \
+             "or stop it first if you are sure: systemctl stop swizzin-store" >&2
+        exit 1
+    fi
+fi
+
 if [[ ${1:-} == --uninstall ]]; then
     systemctl disable --now swizzin-store 2>/dev/null || true
     rm -f "$UNIT" "$NEEDRESTART"
@@ -20,28 +42,28 @@ if [[ ${1:-} == --uninstall ]]; then
     exit 0
 fi
 
-# Root will run these files: never take them from a place the panel user can change.
-if [[ $(stat -c %U "$HERE") == swizzin || $(stat -c %U "$HERE/swizzin_store.py") == swizzin ]]; then
-    echo "Refusing to install from $HERE: the panel user can write it. Use a separate copy (see the top of this script)." >&2
-    exit 1
-fi
+# Root will run these files: each one, and every folder from here up to /, must belong to root and be writable
+# by root only. Otherwise another user (the panel's, for one) could change them, or swap them in between.
+unsafe() { [[ $(stat -c %u "$1") != 0 ]] || (( 8#$(stat -c %a "$1") & 8#022 )); }
+for f in "$HERE/swizzin_store.py" "$HERE/swizzin-store.service" "$HERE/needrestart.conf"; do
+    if unsafe "$f"; then
+        echo "Refusing to install $f: it must belong to root and be writable by root only." >&2
+        exit 1
+    fi
+done
+dir=$HERE
+while :; do
+    if unsafe "$dir"; then
+        echo "Refusing to install from $HERE: $dir must belong to root and be writable by root only." \
+             "Use a copy in /root (see the top of this script)." >&2
+        exit 1
+    fi
+    [[ $dir == / ]] && break
+    dir=$(dirname "$dir")
+done
 id swizzin >/dev/null 2>&1 || { echo "No 'swizzin' user: is the Swizzin panel installed?" >&2; exit 1; }
 [[ -x /usr/bin/python3 ]] || { echo "/usr/bin/python3 is missing." >&2; exit 1; }
 [[ -x /usr/local/bin/swizzin/box ]] || { echo "Swizzin's box command is missing (/usr/local/bin/swizzin/box)." >&2; exit 1; }
-
-# Restarting the helper would cut off an installation in progress.
-if [[ -S /run/swizzin-store/store.sock ]] && /usr/bin/python3 -I -c '
-import json, socket, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect("/run/swizzin-store/store.sock")
-s.sendall(b"{\"op\": \"catalogue\"}\n"); data = b""
-while not data.endswith(b"\n"):
-    chunk = s.recv(65536)
-    if not chunk: break
-    data += chunk
-sys.exit(0 if json.loads(data).get("job") else 1)' 2>/dev/null; then
-    echo "An installation is running in the App Store: wait for it to finish, then run this again." >&2
-    exit 1
-fi
 
 install -d -o root -g root -m 0755 "$DEST"
 install -o root -g root -m 0644 "$HERE/swizzin_store.py" "$DEST/swizzin_store.py"
