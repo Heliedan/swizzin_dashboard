@@ -48,14 +48,14 @@ CONFLICTS = {"emby": ["jellyfin"], "jellyfin": ["emby"], "medusa": ["sickchill",
 UNAVAILABLE = {
     "calibre": ("Swizzin's Calibre installer fails on Ubuntu 24.04 (swizzin/swizzin#1212).", {"noble"}),
     "calibrecs": ("Needs Calibre, whose Swizzin installer fails on Ubuntu 24.04 (swizzin/swizzin#1212).", {"noble"}),
-    "jfago": ("Its page is not found: Swizzin's web address for jfa-go does not match the current jfa-go.", None),
+    "jfago": ("Its page is not found at the address Swizzin sets up for it.", None),
     "lounge": ("The current The Lounge needs Node.js 22, and Swizzin installs Node.js 20.", None),
     "navidrome": ("Not checked yet: its service needs system rights that the test machine did not give.", None),
     "netdata": ("Not checked yet: its service needs system rights that the test machine did not give.", None),
     "nextcloud": ("It asks for three passwords in the terminal, and its page then reports missing PHP modules.", None),
     "ombi": ("Ombi's own package fails to install (Ombi-app/Ombi#5448).", None),
     "rapidleech": ("Swizzin's web setup for Rapidleech does not work, and Rapidleech is no longer maintained.", None),
-    "sabnzbd": ("Its page is not found: Swizzin's web address for SABnzbd does not match the current SABnzbd.", None),
+    "sabnzbd": ("Its page is not found at the address Swizzin sets up for it.", None),
     "sickchill": ("Its service stops right after starting.", None),
     "znc": ("Its setup asks many questions in the terminal: install it over SSH for now.", None),
 }
@@ -75,8 +75,10 @@ NOTES = {
     "quassel": ("Opens port 4242, where the Quassel apps connect.", None),
     "rtorrent": ("Takes about 20 minutes: rTorrent is compiled. On Ubuntu 24.04 it also installs Performance Co-Pilot, "
                  "which opens ports 44321 to 44323 and 4330: a firewall should block them.", None),
-    "rutorrent": ("Takes about 5 minutes.", None),
+    "rutorrent": ("Takes about 6 minutes.", None),
     "sickgear": (_EXPOSED.format(8081), None),
+    "sonarr": ("If the installer says that Sonarr took longer than 30 seconds to start, install it again: it can "
+               "happen on a busy server.", None),
     "syncthing": ("Opens port 22000, to sync with your other devices.", None),
     "tautulli": ("Takes about 15 minutes. Its page has no Swizzin password in front: set a login in its settings right "
                  "after installing.", None),

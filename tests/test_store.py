@@ -102,7 +102,7 @@ class StorePage(unittest.TestCase):
         sonarr = self.item(html, "sonarr")
         self.assertIn('data-check="unreliable"', sonarr)
         self.assertIn('data-path="/sonarr"', sonarr)
-        self.assertIn('data-note="Takes about 5 minutes."', self.item(html, "rutorrent"))
+        self.assertIn('data-note="Takes about 6 minutes."', self.item(html, "rutorrent"))
         self.assertNotIn("data-check", self.item(html, "jellyfin"))
         self.assertNotIn("data-note", self.item(html, "jellyfin"))
 
