@@ -47,6 +47,7 @@
   // --- installing ----------------------------------------------------------------------------
   var root = document.querySelector(".store");
   var base = root.getAttribute("data-urlbase") || "";
+  var askPassword = root.getAttribute("data-ask-password") !== "no";  // STORE_ASK_PASSWORD in swizzin.cfg
   var $ = window.jQuery;
   var el = function (id) { return document.getElementById(id); };
   var MESSAGES = {
@@ -140,11 +141,12 @@
     el("store-keys").hidden = !(live && controller);
     el("store-ctrl-c").hidden = !(live && controller);
     el("store-take").hidden = !(live && !controller);
-    if (!live || controller) {
+    if (askPassword && (!live || controller)) {
       el("store-take-form").hidden = true;
     }
-    el("store-terminal-note").textContent = live && !controller ?
-      "You are watching. Take control (with your password) to answer the installer." : "";
+    el("store-terminal-note").textContent = !live || controller ? "" : askPassword ?
+      "You are watching. Take control (with your password) to answer the installer." :
+      "You are watching. Take control to answer the installer.";
   }
 
   function openTerminal() {
@@ -271,12 +273,16 @@
       el("store-confirm-command").textContent = "box install " + b.getAttribute("data-app");
       el("store-confirm-form").setAttribute("data-app", b.getAttribute("data-app"));
       el("store-confirm-error").textContent = "";
-      el("store-confirm-password").value = "";
+      if (askPassword) {
+        el("store-confirm-password").value = "";
+      }
       el("store-confirm-go").disabled = false;
       $("#store-confirm").modal("show");
     });
   });
-  $("#store-confirm").on("shown.bs.modal", function () { el("store-confirm-password").focus(); });
+  $("#store-confirm").on("shown.bs.modal", function () {
+    el(askPassword ? "store-confirm-password" : "store-confirm-go").focus();
+  });
 
   el("store-confirm-form").addEventListener("submit", function (event) {
     event.preventDefault();
@@ -284,8 +290,12 @@
     el("store-confirm-go").disabled = true;
     el("store-confirm-error").textContent = "";
     setInstallButtons();
-    connect().emit("install", {app: pending, password: el("store-confirm-password").value, rows: 30, cols: 100});
-    el("store-confirm-password").value = "";
+    var request = {app: pending, rows: 30, cols: 100};
+    if (askPassword) {
+      request.password = el("store-confirm-password").value;
+      el("store-confirm-password").value = "";
+    }
+    connect().emit("install", request);
   });
 
   el("store-banner-show").addEventListener("click", function () {
@@ -318,16 +328,22 @@
   });
 
   el("store-take").addEventListener("click", function () {
+    if (!askPassword) {
+      connect().emit("attach", {take: true});
+      return;
+    }
     el("store-take").hidden = true;
     el("store-take-form").hidden = false;
     el("store-take-password").focus();
   });
 
-  el("store-take-form").addEventListener("submit", function (event) {
-    event.preventDefault();
-    connect().emit("attach", {take: true, password: el("store-take-password").value});
-    el("store-take-password").value = "";
-  });
+  if (askPassword) {
+    el("store-take-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      connect().emit("attach", {take: true, password: el("store-take-password").value});
+      el("store-take-password").value = "";
+    });
+  }
 
   el("store-close").addEventListener("click", function () {
     $("#store-terminal").modal("hide");

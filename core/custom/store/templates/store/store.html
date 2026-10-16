@@ -16,7 +16,7 @@
 <div class="d-flex" id="wrapper">
   {{ macros.build_sidebar(pages=pages, vendor=vendor) }}
   {{ macros.build_nav(user=user, apps=pages) }}
-  <div class="container-fluid store" data-urlbase="{{ config.URLBASE }}" data-ready="{{ 'no' if error else 'yes' }}" data-job='{{ job|tojson }}'>
+  <div class="container-fluid store" data-urlbase="{{ config.URLBASE }}" data-ready="{{ 'no' if error else 'yes' }}" data-job='{{ job|tojson }}' data-ask-password="{{ 'yes' if ask_password else 'no' }}">
     <h4 class="mb-1">App Store</h4>
     <p class="text-muted store-intro">The applications Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal. System components and tools set up on the machine itself (nginx, Let's Encrypt, WireGuard, rclone…) are not offered here: install them over SSH.</p>
 
@@ -88,8 +88,10 @@
           </div>
           <div class="modal-body">
             <p>This runs <code id="store-confirm-command"></code> on the server as root, like over SSH. Some installations take several minutes, and the installer may ask you questions in the terminal. Closing the terminal window does not stop the installation.</p>
+            {% if ask_password %}
             <label for="store-confirm-password">Your panel password, to confirm</label>
             <input type="password" class="form-control" id="store-confirm-password" autocomplete="current-password" required>
+            {% endif %}
             <small class="text-danger d-block mt-2" id="store-confirm-error" role="alert"></small>
           </div>
           <div class="modal-footer">
@@ -124,10 +126,12 @@
               </div>
               <button type="button" class="btn btn-sm btn-outline-warning mr-2 mb-1" id="store-ctrl-c" title="Interrupts the installation, like Ctrl+C over SSH">Ctrl+C</button>
               <button type="button" class="btn btn-sm btn-outline-light mr-2" id="store-take">Take control</button>
+              {% if ask_password %}
               <form class="form-inline" id="store-take-form" autocomplete="off" hidden>
                 <input type="password" class="form-control form-control-sm mr-2" id="store-take-password" placeholder="Panel password" aria-label="Panel password" autocomplete="current-password">
                 <button type="submit" class="btn btn-sm btn-primary">Take control</button>
               </form>
+              {% endif %}
               <small class="text-danger ml-2" id="store-terminal-error" role="alert"></small>
             </div>
             <div>

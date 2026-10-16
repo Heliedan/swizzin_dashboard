@@ -74,6 +74,20 @@ class StorePage(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", html)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt; media server", html)
 
+    def test_password_fields_unless_swizzin_cfg_turns_them_off(self):
+        _, html = self.page()
+        self.assertIn('data-ask-password="yes"', html)
+        self.assertIn('id="store-confirm-password"', html)
+        self.assertIn('id="store-take-password"', html)
+        swizzin.app.config["STORE_ASK_PASSWORD"] = False
+        try:
+            _, html = self.page()
+        finally:
+            del swizzin.app.config["STORE_ASK_PASSWORD"]
+        self.assertIn('data-ask-password="no"', html)
+        self.assertNotIn('type="password"', html)
+        self.assertIn('id="store-take"', html)
+
     def test_other_users_are_refused(self):
         r, _ = self.page("other")
         self.assertEqual(r.status_code, 403)

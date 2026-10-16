@@ -145,6 +145,36 @@ class StoreSocket(unittest.TestCase):
         second.emit("input", {"data": "y\r"}, namespace="/store")
         self.assertEqual(self.wait(second, lambda m: "done" in m)[0]["done"]["result"], "installed")
 
+    def test_no_password_when_swizzin_cfg_turns_it_off(self):
+        swizzin.app.config["STORE_ASK_PASSWORD"] = False
+        try:
+            first = self.tab()
+            first.emit("install", {"app": "sonarr", "rows": 24, "cols": 80}, namespace="/store")
+            started, _ = self.wait(first, lambda m: "started" in m or "error" in m)
+            self.assertTrue(started["ok"], started)
+            self.wait(first, lambda m: "Continue?" in m.get("output", ""))
+            second = self.tab()
+            second.emit("attach", {"take": True}, namespace="/store")
+            taken, _ = self.wait(second, lambda m: "attached" in m)
+            self.assertTrue(taken["controller"])
+            second.emit("input", {"data": "y\r"}, namespace="/store")
+            self.assertEqual(self.wait(second, lambda m: "done" in m)[0]["done"]["result"], "installed")
+        finally:
+            del swizzin.app.config["STORE_ASK_PASSWORD"]
+
+    def test_only_false_turns_the_password_off(self):
+        for value in (True, "False", "no", 0, None):
+            swizzin.app.config["STORE_ASK_PASSWORD"] = value
+            try:
+                tab = self.tab()
+                tab.emit("install", {"app": "sonarr"}, namespace="/store")
+                self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "password"}, value)
+                tab.emit("attach", {"take": True}, namespace="/store")
+                self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "password"}, value)
+            finally:
+                del swizzin.app.config["STORE_ASK_PASSWORD"]
+        self.assertFalse(os.path.exists(os.path.join(self.base, "locks", ".sonarr.lock")))
+
     def test_closing_the_tab_closes_its_helper_connection(self):
         tab = self.tab()
         tab.emit("attach", {}, namespace="/store")

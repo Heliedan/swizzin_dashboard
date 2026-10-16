@@ -6,7 +6,8 @@ helper also runs the installations (`box install <app>` in a pseudo-terminal); t
 relays them to the page over the Socket.IO namespace /store, one helper connection per tab.
 Admin only: the page, the token and the namespace check the admin's Basic login, the
 namespace also wants the page's token, and installing or taking control asks for the admin
-password again (counted with the other failed logins).
+password again (counted with the other failed logins), unless swizzin.cfg says
+STORE_ASK_PASSWORD = False.
 
 This package lives in core/custom/ so that `box upgrade panel` keeps it. register() runs
 once per import of swizzin.py (it is imported twice at startup), so it creates its own
@@ -147,6 +148,10 @@ def register(app, socketio, htpasswd):
     def socket_path():
         return app.config.get("STORE_SOCKET", SOCKET)
 
+    def ask_password():
+        """Only an explicit False in swizzin.cfg turns it off: a typo or another value keeps asking."""
+        return app.config.get("STORE_ASK_PASSWORD") is not False
+
     @bp.route("/apps")
     @htpasswd.required
     def catalogue(user):
@@ -164,7 +169,8 @@ def register(app, socketio, htpasswd):
         vendor = "sbio" if os.path.isfile("/install/.sbio.lock") else "swizzin"
         response = flask.make_response(flask.render_template(
             "store/store.html", title="App Store", user=user, pages=util.generate_page_list(user),
-            vendor=vendor, apps=shown, error=error, job=reply.get("job"), last=reply.get("last")))
+            vendor=vendor, apps=shown, error=error, job=reply.get("job"), last=reply.get("last"),
+            ask_password=ask_password()))
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -229,7 +235,7 @@ def register(app, socketio, htpasswd):
     @socketio.on("install", namespace="/store")
     def store_install(msg):
         msg = msg if isinstance(msg, dict) else {}
-        if not password_ok(msg.get("password")):
+        if ask_password() and not password_ok(msg.get("password")):
             emit("helper", {"ok": False, "error": "password"})
             return
         relay({"op": "install", "app": msg.get("app"), "rows": msg.get("rows"), "cols": msg.get("cols")})
@@ -241,7 +247,7 @@ def register(app, socketio, htpasswd):
         if isinstance(msg.get("control_key"), str):
             request["control_key"] = msg["control_key"]
         if msg.get("take"):
-            if not password_ok(msg.get("password")):
+            if ask_password() and not password_ok(msg.get("password")):
                 emit("helper", {"ok": False, "error": "password"})
                 return
             request["take"] = True
