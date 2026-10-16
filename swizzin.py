@@ -63,6 +63,11 @@ if app.config['RATELIMIT_ENABLED'] == True:
 
 from core.util import *
 from core.custom.live_stats import live_stats  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
+try:  # App Store page (core/custom/store, see the README): a problem there must not stop the panel
+    from core.custom import store as app_store
+    app_store.register(app, socketio, htpasswd)
+except Exception:
+    app.logger.exception("App Store disabled: it could not be loaded")
 
 #Prepare the background threads
 thread = None

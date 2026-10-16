@@ -6,6 +6,9 @@ f{% macro build_sidebar(pages, vendor) %}
       <div class="sidebar-heading"><img class="logo" src="{{ url_for('static', filename='img/logo-dark.png') }}" /></div>
     {% endif %}
     <div class="list-group list-group-flush">
+    {% if config.STORE_ENABLED and g.user and g.user == config.ADMIN_USER %}
+        <a href="{{ url_for('store.catalogue') }}" class="list-group-item list-group-item-action bg-dark{{ ' active' if request.endpoint == 'store.catalogue' }}"><img src="{{ url_for('store.static', filename='store.svg') }}" class="app-icon" alt="">App Store</a>
+    {% endif %}
     {% for page in pages|sort(attribute="pretty_name") if page.url %}
         <a href="{{page.url}}" target="_blank" class="list-group-item list-group-item-action bg-dark"><img src="{{ url_for('static', filename='img/apps/'+page.img+'.png') }}" class="app-icon">{{page.pretty_name}}</a>
     {% endfor %}

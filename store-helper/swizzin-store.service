@@ -1,0 +1,19 @@
+[Unit]
+Description=Swizzin App Store helper (lists Swizzin apps for the panel)
+After=local-fs.target
+
+[Service]
+# Runs as root on purpose: it reads /etc/swizzin, which only root can read. No Group=,
+# PrivateTmp or ProtectSystem: Swizzin installers will run under it and need the real system.
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/swizzin-store/swizzin_store.py
+RuntimeDirectory=swizzin-store
+RuntimeDirectoryMode=0750
+LogsDirectory=swizzin-store
+LogsDirectoryMode=0700
+WorkingDirectory=/root
+UMask=0022
+Restart=on-failure
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

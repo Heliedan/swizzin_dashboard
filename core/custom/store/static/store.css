@@ -1,0 +1,21 @@
+/* App Store page, in the dashboard's darkly theme. */
+.store { padding-top: 1rem; padding-bottom: 2rem; }
+.store-intro { max-width: 52rem; }
+.store-toolbar { margin-bottom: .25rem; }
+#store-search { max-width: 20rem; }
+.store-heading { margin: 1rem 0 .75rem; }
+.store-card { border: 1px solid rgba(255, 255, 255, .08); }
+.store-card.installed { border-color: rgba(0, 188, 140, .45); }  /* darkly's success colour */
+.store-icon { width: 36px; height: 36px; flex: 0 0 36px; margin-right: .65rem; object-fit: contain; }
+.store-letter {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background-color: #375a7f; color: #fff; font-weight: 700;
+}
+.store-name { font-weight: 600; line-height: 1.2; }
+.store-id { font-size: .8rem; }
+.store-desc {  /* 4 lines at most, so that one long text does not stretch a whole row; full text in the title */
+  font-size: .875rem; color: #ced4da;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+}
+.store-foot { background-color: transparent; border-top: 1px solid rgba(255, 255, 255, .06); }
+.store-foot code { font-size: .8rem; overflow-wrap: anywhere; }  /* breaks at spaces first */

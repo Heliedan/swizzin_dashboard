@@ -1,0 +1,91 @@
+{% import "macros.html" as macros %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>{{ title }}</title>
+  <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon/favicon.ico') }}">
+  {# This page will be able to install software as root: every third-party file is pinned (SRI). #}
+  <link rel="stylesheet" type="text/css" href="https://stackpath.bootstrapcdn.com/bootswatch/4.4.1/darkly/bootstrap.min.css" integrity="sha384-rCA2D+D9QXuP2TomtQwd+uP50EHjpafN+wruul0sXZzX/Da7Txn4tB9aLMZV4DZm" crossorigin="anonymous">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/swizzin.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('store.static', filename='store.css') }}">
+</head>
+<body>
+<div class="d-flex" id="wrapper">
+  {{ macros.build_sidebar(pages=pages, vendor=vendor) }}
+  {{ macros.build_nav(user=user, apps=pages) }}
+  <div class="container-fluid store">
+    <h4 class="mb-1">App Store</h4>
+    <p class="text-muted store-intro">Every application Swizzin can install, and which ones are already on this server. Installing from this page comes in the next version: for now, run <code>sudo box install &lt;name&gt;</code> over SSH.</p>
+
+    {% if error %}
+    <div class="alert alert-warning" role="alert">
+      {% if error == "unavailable" %}
+      The App Store helper is not running on this server, so the list of Swizzin applications cannot be read (only root can read it).
+      Install it with <code>store-helper/install.sh</code> (see the README), or check it with <code>systemctl status swizzin-store</code>.
+      {% else %}
+      The App Store helper could not read the list of Swizzin applications. See <code>journalctl -u swizzin-store</code>.
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="store-toolbar d-flex flex-wrap align-items-center">
+      <input type="search" id="store-search" class="form-control mr-2 mb-2" placeholder="Search" aria-label="Search applications" autocomplete="off">
+      <div class="btn-group mb-2" role="group" aria-label="Show">
+        <button type="button" class="btn btn-secondary active" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" class="btn btn-secondary" data-filter="installed" aria-pressed="false">Installed</button>
+        <button type="button" class="btn btn-secondary" data-filter="available" aria-pressed="false">Available</button>
+      </div>
+    </div>
+
+    {% for key, heading in [("apps", "Applications"), ("system", "System & tools")] %}
+    <section class="store-section" data-section="{{ key }}">
+      <h5 class="store-heading">{{ heading }} <span class="badge badge-secondary store-count">{{ sections[key]|length }}</span></h5>
+      <div class="row">
+        {% for e in sections[key] %}
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}">
+          <div class="card h-100 store-card{{ ' installed' if e.installed }}">
+            <div class="card-body">
+              <div class="d-flex align-items-center mb-2">
+                {% if e.icon %}<img class="store-icon" src="{{ url_for('static', filename=e.icon) }}" alt="">{% else %}<span class="store-icon store-letter" aria-hidden="true">{{ e.pretty[:1]|upper }}</span>{% endif %}
+                <div>
+                  <div class="store-name">{{ e.pretty }}</div>
+                  <div class="store-id text-muted">{{ e.name }}</div>
+                </div>
+              </div>
+              <p class="store-desc mb-0" title="{{ e.description }}">{{ e.description }}</p>
+            </div>
+            <div class="card-footer store-foot">
+              {% if e.installed %}
+              <span class="badge badge-success">Installed</span>
+              {% elif e.blocked %}
+              <span class="badge badge-secondary">SSH only</span>
+              <small class="text-muted d-block mt-1">{{ e.why }}</small>
+              <code class="d-block mt-1">sudo box install {{ e.name }}</code>
+              {% elif e.missing %}
+              <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Install</button>
+              <small class="text-muted ml-1">Requires {{ e.missing|join(", ") }}</small>
+              {% else %}
+              <button type="button" class="btn btn-sm btn-primary" disabled title="Installing from the panel comes in the next version">Install</button>
+              {% endif %}
+              {% if e.conflicts and not e.installed %}
+              <small class="text-warning d-block mt-1">The installer will offer to disable {{ e.conflicts|join(", ") }}.</small>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+    <p id="store-empty" class="text-muted" hidden>No application matches.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.bundle.min.js" integrity="sha384-6khuMg9gaYr5AxOqhkVIODVIvm9ynTT5J4V1cfthmT+emCG6yVmEZsRHdxlotUnm" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/swizzin.js') }}"></script>
+<script src="{{ url_for('store.static', filename='store.js') }}"></script>
+</body>
+</html>

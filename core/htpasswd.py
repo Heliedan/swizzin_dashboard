@@ -319,6 +319,7 @@ class HtPasswdAuth:
             is_valid, user = self.authenticate()
             if not is_valid:
                 return self.auth_failed()
+            g.user = user  # templates (the sidebar) can tell who is logged in
             kwargs['user'] = user
             return func(*args, **kwargs)
         return decorated
