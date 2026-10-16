@@ -41,9 +41,11 @@ import termios
 import time
 
 NAME = re.compile(r"[a-z0-9]{1,32}")
-# Installed over SSH only: they change how the server itself is reached or secured,
-# give root access from the web, or do something unexpected (xmrig mines to a pool).
-BLOCKED = ("panel", "nginx", "letsencrypt", "quota", "wireguard", "x2go", "xmrig", "webmin", "shellinabox")
+# Not offered by the App Store, refused here: system components and tools that are set up on the
+# machine itself (over SSH), some of which change how the server is reached or secured, and xmrig,
+# a cryptocurrency miner that mines for the Swizzin project when it is not given a wallet.
+BLOCKED = ("panel", "nginx", "letsencrypt", "quota", "wireguard", "x2go", "webmin", "shellinabox",
+           "ffmpeg", "rclone", "vsftpd", "duckdns", "xmrig")
 MAX_CLIENTS = 8
 MAX_LINE = 64 * 1024
 MAX_PENDING_OUTPUT = 2 * 1024 * 1024
@@ -78,7 +80,7 @@ def options(argv=None):
                    help="the only user besides root allowed to connect; the socket belongs to its group")
     p.add_argument("--allow-uid", type=int,
                    help="tests: allow this uid instead of the panel user, and leave the socket group alone")
-    p.add_argument("--blocked", default=",".join(BLOCKED), help="comma-separated apps shown as SSH only")
+    p.add_argument("--blocked", default=",".join(BLOCKED), help="comma-separated apps the store does not offer")
     return p.parse_args(argv)
 
 

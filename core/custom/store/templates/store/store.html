@@ -18,7 +18,7 @@
   {{ macros.build_nav(user=user, apps=pages) }}
   <div class="container-fluid store" data-urlbase="{{ config.URLBASE }}" data-ready="{{ 'no' if error else 'yes' }}" data-job='{{ job|tojson }}'>
     <h4 class="mb-1">App Store</h4>
-    <p class="text-muted store-intro">Every application Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal.</p>
+    <p class="text-muted store-intro">The applications Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal. System components and tools set up on the machine itself (nginx, Let's Encrypt, WireGuard, rclone…) are not offered here: install them over SSH.</p>
 
     {% if error %}
     <div class="alert alert-warning" role="alert">
@@ -43,11 +43,10 @@
       </div>
     </div>
 
-    {% for key, heading in [("apps", "Applications"), ("system", "System & tools")] %}
-    <section class="store-section" data-section="{{ key }}">
-      <h5 class="store-heading">{{ heading }} <span class="badge badge-secondary store-count">{{ sections[key]|length }}</span></h5>
+    <section class="store-section" data-section="apps">
+      <h5 class="store-heading">Applications <span class="badge badge-secondary store-count">{{ apps|length }}</span></h5>
       <div class="row">
-        {% for e in sections[key] %}
+        {% for e in apps %}
         <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}">
           <div class="card h-100 store-card{{ ' installed' if e.installed }}">
             <div class="card-body">
@@ -63,10 +62,6 @@
             <div class="card-footer store-foot">
               {% if e.installed %}
               <span class="badge badge-success">Installed</span>
-              {% elif e.blocked %}
-              <span class="badge badge-secondary">SSH only</span>
-              <small class="text-muted d-block mt-1">{{ e.why }}</small>
-              <code class="d-block mt-1">sudo box install {{ e.name }}</code>
               {% elif e.missing %}
               <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Install</button>
               <small class="text-muted ml-1">Requires {{ e.missing|join(", ") }}</small>
@@ -82,7 +77,6 @@
         {% endfor %}
       </div>
     </section>
-    {% endfor %}
     <p id="store-empty" class="text-muted" hidden>No application matches.</p>
 
     <div class="modal fade" id="store-confirm" tabindex="-1" role="dialog" aria-labelledby="store-confirm-title" aria-hidden="true">

@@ -27,33 +27,18 @@ from core.htpasswd import client_address
 
 SOCKET = "/run/swizzin-store/store.sock"
 
-# Shown under "System & tools" rather than "Applications".
-SYSTEM = {"nginx", "panel", "letsencrypt", "quota", "ffmpeg", "rclone", "vsftpd", "wireguard",
-          "x2go", "webmin", "shellinabox", "duckdns"}
 # Names for apps without a panel profile (the others use the profile's pretty_name).
-PRETTY = {"airsonic": "Airsonic", "calibre": "Calibre", "duckdns": "DuckDNS", "ffmpeg": "FFmpeg",
-          "jfago": "jfa-go", "letsencrypt": "Let's Encrypt", "nginx": "nginx", "panel": "Swizzin panel",
-          "quota": "Quota", "rclone": "rclone", "vsftpd": "vsftpd", "x2go": "X2Go"}
+PRETTY = {"airsonic": "Airsonic", "calibre": "Calibre", "jfago": "jfa-go"}
 # Swizzin has no description for these two.
 DESCRIPTIONS = {"calibre": "The Calibre e-book manager, used by Calibre Content Server and Calibre-Web.",
                 "calibrecs": "Calibre Content Server: browse and read your Calibre library from the web."}
 # What an installer expects but does not check, or aborts without.
 REQUIRES = {"rutorrent": ["nginx", "rtorrent"], "flood": ["rtorrent"], "qui": ["qbittorrent"],
-            "jfago": ["jellyfin"], "tautulli": ["plex"], "calibrecs": ["calibre"], "letsencrypt": ["nginx"],
+            "jfago": ["jellyfin"], "tautulli": ["plex"], "calibrecs": ["calibre"],
             "nextcloud": ["nginx"], "librespeed": ["nginx"], "rapidleech": ["nginx"], "organizr": ["nginx"]}
 # The installer offers to disable the other one.
 CONFLICTS = {"emby": ["jellyfin"], "jellyfin": ["emby"], "medusa": ["sickchill", "sickgear"],
              "sickchill": ["medusa", "sickgear"], "sickgear": ["medusa", "sickchill"]}
-# Why an app is SSH only (the helper decides which ones are).
-SSH_ONLY = {"panel": "It is the panel you are using.",
-            "nginx": "Every web page of the server goes through it.",
-            "letsencrypt": "It rewrites the server's HTTPS setup and asks for a domain.",
-            "quota": "It edits fstab and remounts the disks.",
-            "wireguard": "It changes the network (forwarding, NAT) and can cut a VPN you rely on.",
-            "x2go": "A heavy desktop install.",
-            "xmrig": "A cryptocurrency miner: without a wallet it mines for the Swizzin project.",
-            "webmin": "It gives root access from the web.",
-            "shellinabox": "It gives a shell from the web."}
 
 
 class StoreUnavailable(Exception):
@@ -79,28 +64,27 @@ def helper_call(request, path, timeout=3):
 
 
 def entries(apps, static_folder):
-    """What the page shows for each app, in two sections."""
+    """What the page shows for each app. The apps the helper does not offer (system components and
+    tools set up on the machine itself, see BLOCKED in store-helper/swizzin_store.py) are left out."""
     installed = {a["name"] for a in apps if a.get("installed")}
-    sections = {"apps": [], "system": []}
+    shown = []
     for a in apps:
         name = a["name"]
+        if a.get("blocked"):
+            continue
         profile = getattr(util, name + "_meta", None)  # the class only: some profiles read files when created
         img = getattr(profile, "img", name)
         icon = "img/apps/{}.png".format(img)
-        sections["system" if name in SYSTEM else "apps"].append({
+        shown.append({
             "name": name,
             "pretty": getattr(profile, "pretty_name", None) or PRETTY.get(name, name),
             "description": a.get("description") or DESCRIPTIONS.get(name, ""),
             "installed": bool(a.get("installed")),
-            "blocked": bool(a.get("blocked")),
-            "why": SSH_ONLY.get(name, "Install it over SSH."),
             "missing": [r for r in REQUIRES.get(name, []) if r not in installed],
             "conflicts": [c for c in CONFLICTS.get(name, []) if c in installed],
             "icon": icon if os.path.isfile(os.path.join(static_folder, icon)) else None,
         })
-    for items in sections.values():
-        items.sort(key=lambda e: e["pretty"].lower())
-    return sections
+    return sorted(shown, key=lambda e: e["pretty"].lower())
 
 
 class HelperLink:
@@ -176,11 +160,11 @@ def register(app, socketio, htpasswd):
         except StoreUnavailable as e:
             app.logger.warning("App Store helper unavailable: %s", e)
             reply, error = {}, "unavailable"
-        sections = entries(reply.get("apps", []), app.static_folder)
+        shown = entries(reply.get("apps", []), app.static_folder)
         vendor = "sbio" if os.path.isfile("/install/.sbio.lock") else "swizzin"
         response = flask.make_response(flask.render_template(
             "store/store.html", title="App Store", user=user, pages=util.generate_page_list(user),
-            vendor=vendor, sections=sections, error=error, job=reply.get("job"), last=reply.get("last")))
+            vendor=vendor, apps=shown, error=error, job=reply.get("job"), last=reply.get("last")))
         response.headers["Cache-Control"] = "no-store"
         return response
 

@@ -63,7 +63,8 @@ class StorePage(unittest.TestCase):
         self.assertEqual(r.headers["Cache-Control"], "no-store")
         self.assertIn('class="store-name">Jellyfin<', html)  # the panel profile's name
         self.assertIn("Requires rtorrent", html)  # rutorrent, with nginx installed but not rtorrent
-        self.assertIn("SSH only", html)  # letsencrypt
+        self.assertNotIn('data-app="letsencrypt"', html)  # system components are not offered at all
+        self.assertNotIn('data-app="nginx"', html)
         self.assertIn("The installer will offer to disable jellyfin", html)  # emby, jellyfin installed
         self.assertIn('data-installed="yes"', html)
         self.assertNotIn("Bad Name", html)
