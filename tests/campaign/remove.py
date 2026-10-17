@@ -115,10 +115,11 @@ FAILURES = [
 
 
 def table_data():
-    """removable.py's table, every app marked tested, in the JSON shape of the helper's --table."""
+    """removable.py's table, every app marked tested on the containers' system (Ubuntu 24.04), in the JSON shape
+    of the helper's --table."""
     common, pins, apps = removable.load()
     return {"common": list(common), "pins": {k: list(v) for k, v in pins.items()},
-            "apps": {name: dict(dataclasses.asdict(entry), tested=True) for name, entry in apps.items()}}
+            "apps": {name: dict(dataclasses.asdict(entry), tested=["noble"]) for name, entry in apps.items()}}
 
 
 def plain_entry(entry):

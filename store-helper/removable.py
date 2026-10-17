@@ -7,7 +7,8 @@ loads Swizzin's environment and runs the app's own remove script, after saving t
 
 A file of Swizzin that a removal runs or loads must have one of the known sha256 below. When an update of
 Swizzin changes one of them, the removal of the apps concerned is turned off until a new version of the
-App Store has checked the new file. An app is offered only once it passed the container campaign (tested).
+App Store has checked the new file. An app is offered only on the systems where it passed the container campaign
+(tested: VERSION_CODENAME of /etc/os-release; tests/campaign/remove.py, 2026-10-17, Ubuntu 24.04).
 
 Paths may contain {user} (every user with a home: Swizzin's users, htpasswd users and the users of the
 app's unit instances), {master} (Swizzin's master user) and {owner} (the User= of owner_unit, else the
@@ -75,22 +76,26 @@ class App:
     refuse_if: tuple = ()       # installed apps that make the removal unsafe
     answers: tuple = ()         # (exact question, answer) typed in for the user
     partial: bool = False       # the copy leaves out large data the app rebuilds
-    tested: bool = False        # passed the container campaign: only then offered
+    tested: tuple = ()          # the systems where it passed the container campaign: only there offered
 
 
 def _home(user, *names):
     return "/home/{%s}/" % user + "/".join(names)
 
 
+NOBLE = ("noble",)  # Ubuntu 24.04
+
 APPS = {
     # The program and its data live together in /opt/airsonic; the script forgets the unit and its env file.
     "airsonic": App(
+        tested=NOBLE,
         units=("airsonic",),
         copy=("/opt/airsonic/airsonic.properties", "/opt/airsonic/db"),
         gone=("/opt/airsonic",),
         nginx=("/etc/nginx/apps/airsonic.conf",),
         leftovers=("/etc/systemd/system/airsonic.service", "/etc/sysconfig/airsonic", "/etc/defaults/airsonic")),
     "autobrr": App(
+        tested=NOBLE,
         sources=("sources/functions/utils",),
         units=("autobrr@",),
         copy=(_home("user", ".config/autobrr"), "/etc/nginx/conf.d/{user}.autobrr.conf"),
@@ -99,6 +104,7 @@ APPS = {
               "/etc/systemd/system/autobrr@.service"),
         nginx=("/etc/nginx/apps/autobrr.conf", "/etc/nginx/conf.d/*.autobrr.conf")),
     "bazarr": App(
+        tested=NOBLE,
         units=("bazarr",),
         copy=("/opt/bazarr/data",),
         skip=("cache", "log"),
@@ -106,6 +112,7 @@ APPS = {
         nginx=("/etc/nginx/apps/bazarr.conf",)),
     # The script deletes its data before stopping the service: the runner stops it first.
     "calibreweb": App(
+        tested=NOBLE,
         units=("calibreweb",),
         copy=("/opt/calibreweb/app.db*", "/opt/calibreweb/gdrive.db*", "/opt/calibreweb/client_secrets.json",
               "/opt/calibreweb/gdrive_credentials", "/var/lib/swizzin/db/calibre"),
@@ -113,12 +120,14 @@ APPS = {
         nginx=("/etc/nginx/apps/calibreweb.conf",)),
     # dpkg -r keeps Emby's data; the script never reloads nginx (the runner does).
     "emby": App(
+        tested=NOBLE,
         units=("emby-server",),
         kept=("/var/lib/emby",),
         nginx=("/etc/nginx/apps/emby.conf",),
         packages=("emby-server",),
         allowed=(r"emby-server",)),
     "filebrowser": App(
+        tested=NOBLE,
         units=("filebrowser",),
         copy=(_home("master", ".config/Filebrowser"),),
         gone=(_home("master", ".config/Filebrowser"), _home("master", "bin/filebrowser"),
@@ -126,6 +135,7 @@ APPS = {
         nginx=("/etc/nginx/apps/filebrowser.conf",)),
     # Its program is npm's global package, removed by the script with `npm -g remove`.
     "flood": App(
+        tested=NOBLE,
         units=("flood@",),
         copy=(_home("user", ".config/flood"), _home("user", ".flood"), "/etc/nginx/conf.d/{user}.flood.conf"),
         skip=("temp",),
@@ -134,16 +144,19 @@ APPS = {
         nginx=("/etc/nginx/apps/flood.conf", "/etc/nginx/conf.d/*.flood.conf")),
     # The script deletes the program and its settings before stopping it (Restart=always): the runner stops it first.
     "jackett": App(
+        tested=NOBLE,
         units=("jackett@",),
         copy=(_home("master", ".config/Jackett"),),
         skip=("log.txt*", "updater.txt*"),
         gone=(_home("master", "Jackett"), _home("master", ".config/Jackett"), "/etc/systemd/system/jackett@.service"),
         nginx=("/etc/nginx/apps/jackett.conf",)),
     "librespeed": App(
+        tested=NOBLE,
         gone=("/srv/librespeed",),
         nginx=("/etc/nginx/apps/librespeed.conf",)),
     # Its settings stay, but a reinstall rewrites config.xml (new API key): it is copied anyway.
     "lidarr": App(
+        tested=NOBLE,
         units=("lidarr",), owner_unit="lidarr",
         copy=(_home("owner", ".config/Lidarr/config.xml"), "/var/lib/swizzin/db/lidarr"),
         gone=("/opt/Lidarr", "/etc/systemd/system/lidarr.service"),
@@ -151,12 +164,14 @@ APPS = {
         nginx=("/etc/nginx/apps/lidarr.conf",)),
     # The program folder is also the data folder; the script deletes the unit at a wrong path.
     "medusa": App(
+        tested=NOBLE,
         units=("medusa",),
         copy=("/opt/medusa/config.ini", "/opt/medusa/main.db*", "/opt/medusa/cache.db*", "/opt/medusa/failed.db*"),
         gone=("/opt/medusa", "/opt/.venv/medusa"),
         nginx=("/etc/nginx/apps/medusa.conf",),
         leftovers=("/etc/systemd/system/medusa.service",)),
     "mylar": App(
+        tested=NOBLE,
         sources=("sources/functions/utils",),
         units=("mylar",), owner_unit="mylar",
         copy=(_home("owner", ".config/mylar"), "/var/lib/swizzin/db/mylar"),
@@ -164,12 +179,14 @@ APPS = {
         gone=(_home("owner", ".config/mylar"), "/opt/mylar", "/opt/.venv/mylar", "/etc/systemd/system/mylar.service"),
         nginx=("/etc/nginx/apps/mylar.conf",)),
     "netronome": App(
+        tested=NOBLE,
         sources=("sources/functions/utils",),
         units=("netronome@",),
         copy=(_home("user", ".config/netronome"), "/etc/nginx/conf.d/{user}.netronome.conf"),
         gone=(_home("user", ".config/netronome"), "/usr/bin/netronome", "/etc/systemd/system/netronome@.service"),
         nginx=("/etc/nginx/apps/netronome.conf", "/etc/nginx/conf.d/*.netronome.conf")),
     "nzbhydra": App(
+        tested=NOBLE,
         sources=("sources/functions/utils",),
         units=("nzbhydra",),
         copy=(_home("master", ".config/nzbhydra2"),),
@@ -178,12 +195,14 @@ APPS = {
         nginx=("/etc/nginx/apps/nzbhydra.conf",)),
     # No service (php-fpm); /root/.organizr is kept by the script but rewritten by a reinstall.
     "organizr": App(
+        tested=NOBLE,
         copy=("/srv/organizr_db", "/srv/organizr/api/config", "/root/.organizr"),
         gone=("/srv/organizr", "/srv/organizr_db", "/etc/fail2ban/filter.d/organizr-auth.conf",
               "/etc/fail2ban/jail.d/organizr-auth.conf"),
         nginx=("/etc/nginx/apps/organizr.conf",)),
     # Only the settings and the databases are copied: metadata, posters and caches can weigh many GB.
     "plex": App(
+        tested=NOBLE,
         units=("plexmediaserver",),
         copy=("/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml",
               "/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Plug-in Support/Databases"),
@@ -193,6 +212,7 @@ APPS = {
         partial=True),
     # Its question "purge the configuration?" gets Swizzin's default answer: the copy keeps the settings.
     "prowlarr": App(
+        tested=NOBLE,
         units=("prowlarr",), owner_unit="prowlarr",
         copy=(_home("owner", ".config/Prowlarr"), "/var/lib/swizzin/db/prowlarr"),
         skip=("logs", "logs.db*", "Backups"),
@@ -203,6 +223,7 @@ APPS = {
     # rewrites it. Its libtorrent purge would take Deluge with it when Deluge is installed. It also forgets
     # qbtindex.conf, the web index of the downloads (/qbittorrent.downloads): deleted after it.
     "qbittorrent": App(
+        tested=NOBLE,
         sources=("sources/functions/utils", "sources/functions/libtorrent"),
         units=("qbittorrent@",),
         copy=(_home("user", ".config/qBittorrent/qBittorrent.conf"), "/etc/nginx/conf.d/{user}.qbittorrent.conf"),
@@ -218,6 +239,7 @@ APPS = {
                  r"(qtbase5|qttools5|qt6|cmake)-swizzin"),
         refuse_if=("deluge",)),
     "qui": App(
+        tested=NOBLE,
         sources=("sources/functions/utils",),
         units=("qui@",),
         copy=(_home("user", ".config/qui"), "/etc/nginx/conf.d/{user}.qui.conf"),
@@ -225,6 +247,7 @@ APPS = {
         nginx=("/etc/nginx/apps/qui.conf", "/etc/nginx/conf.d/*.qui.conf")),
     # Its settings stay, but a reinstall rewrites config.xml: it is copied anyway.
     "radarr": App(
+        tested=NOBLE,
         units=("radarr",), owner_unit="radarr",
         copy=(_home("owner", ".config/Radarr/config.xml"), "/var/lib/swizzin/db/radarr"),
         gone=("/opt/Radarr", "/etc/systemd/system/radarr.service"),
@@ -232,6 +255,7 @@ APPS = {
         nginx=("/etc/nginx/apps/radarr.conf",)),
     # The program folder is also the data folder; the script deletes the unit at a wrong path.
     "sickgear": App(
+        tested=NOBLE,
         units=("sickgear",),
         copy=("/opt/sickgear/config.ini", "/opt/sickgear/sickbeard.db*", "/opt/sickgear/cache.db*",
               "/opt/sickgear/failed.db*"),
@@ -240,6 +264,7 @@ APPS = {
         leftovers=("/etc/systemd/system/sickgear.service",)),
     # Nothing of the user's is deleted: settings, keys and synced folders stay in the master's home.
     "syncthing": App(
+        tested=NOBLE,
         units=("syncthing@",),
         gone=("/etc/systemd/system/syncthing@.service",),
         kept=(_home("master", ".config/syncthing"), _home("master", ".local/state/syncthing"),
@@ -248,6 +273,7 @@ APPS = {
         packages=("syncthing",),
         allowed=(r"syncthing",)),
     "tautulli": App(
+        tested=NOBLE,
         units=("tautulli",),
         copy=("/opt/tautulli/config.ini", "/opt/tautulli/tautulli.db*"),
         gone=("/opt/tautulli", "/opt/.venv/tautulli", "/etc/systemd/system/tautulli.service"),
@@ -256,6 +282,7 @@ APPS = {
     # removes the PPA its installer added (Ubuntu), and forgets tmsindex.conf, the web index of the downloads
     # (/transmission.downloads): deleted after it.
     "transmission": App(
+        tested=NOBLE,
         units=("transmission@",),
         copy=(_home("user", ".config/transmission-daemon/settings.json"), "/etc/nginx/conf.d/{user}.transmission.conf"),
         gone=(_home("user", ".config/transmission-daemon/settings.json"), "/etc/systemd/system/transmission@.service",

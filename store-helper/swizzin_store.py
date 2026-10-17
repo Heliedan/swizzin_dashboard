@@ -113,6 +113,7 @@ def options(argv=None):
     p.add_argument("--no-remove", default="/etc/swizzin-store.no-remove",
                    help="uninstalling from the App Store is turned off while this file exists")
     p.add_argument("--root", default="/", help="tests: the uninstaller takes every path under this folder")
+    p.add_argument("--os-release", default="/etc/os-release", help="tests: the file that says which system this is")
     p.add_argument("--table", help="tests: a JSON table of uninstallable apps instead of removable.py")
     p.add_argument("--test-path", help="tests: folder put first in the uninstaller's PATH (fake system tools)")
     p.add_argument("--test-env", action="append", default=[], help="tests: NAME=VALUE for the uninstaller")
@@ -152,15 +153,30 @@ def catalogue(opts):
              "remove": removal_status(opts, table, n) if n in locks else None} for n in app_names(opts)]
 
 
+def os_codename(path):
+    """'noble', 'bookworm'... or None."""
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("VERSION_CODENAME="):
+                    return line.split("=", 1)[1].strip().strip('"') or None
+    except OSError:
+        pass
+    return None
+
+
 def removal_status(opts, table, app):
     """'ok', or why the App Store does not uninstall this app now: not-offered, untested (not through the
-    campaign yet), disabled (by root), script-changed (an update of Swizzin changed a file it would run)."""
+    campaign yet), other-system (the campaign tested it on other systems only), disabled (by root), script-changed
+    (an update of Swizzin changed a file it would run)."""
     common, pins, apps = table
     entry = apps.get(app)
     if entry is None:
         return "not-offered"
     if not entry.tested:
         return "untested"
+    if os_codename(opts.os_release) not in entry.tested:
+        return "other-system"
     if os.path.exists(opts.no_remove):
         return "disabled"
     for rel in common + entry.sources + (removable.script(app),):
@@ -513,7 +529,8 @@ class Helper:
             return "unknown"
         status = removal_status(self.opts, removable.load(self.opts.table), app)
         if status != "ok":
-            return {"not-offered": "not-removable", "untested": "not-removable"}.get(status, status)
+            return {"not-offered": "not-removable", "untested": "not-removable",
+                    "other-system": "not-removable"}.get(status, status)
         if not installed(self.opts, app) and not self._retry(app):
             return "not-installed"
         if self.job is not None and self.job.phase != "done":

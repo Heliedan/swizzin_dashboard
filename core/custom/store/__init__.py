@@ -143,6 +143,7 @@ REMOVE_SSH_ONLY = {
 REMOVE_STATUS = {
     "not-offered": "The App Store does not uninstall this app: use box remove over SSH.",
     "untested": "Uninstalling it from here is not offered yet.",
+    "other-system": "Uninstalling it from here was tested on Ubuntu 24.04 only, not on this system.",
     "disabled": "Uninstalling from the App Store is turned off on this server.",
     "script-changed": "An update of Swizzin changed its removal since the App Store checked it: uninstall it over "
                       "SSH, or update the App Store.",

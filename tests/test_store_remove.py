@@ -7,7 +7,6 @@ import glob
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -25,8 +24,11 @@ FAKE_BOX = "#!/bin/bash\necho \"box $*\"; sleep 30\n"  # a long installation, to
 class Remove(unittest.TestCase):
     def setUp(self):
         self.w = World()
-        self.w.apps["demo"]["tested"] = True
+        self.w.apps["demo"]["tested"] = ["noble"]
         self.w.write_table()
+        self.os_release = os.path.join(self.w.base, "os-release")
+        with open(self.os_release, "w") as f:
+            f.write('PRETTY_NAME="Ubuntu 24.04.5 LTS"\nVERSION_CODENAME=noble\n')
         fake_swizzin(self.w.base)  # install scripts and descriptions for the catalogue
         open(os.path.join(self.w.base, "scripts", "demo.sh"), "w").close()
         open(os.path.join(self.w.base, "scripts", "other.sh"), "w").close()
@@ -44,6 +46,7 @@ class Remove(unittest.TestCase):
             "--swizzin", self.w.swizzin, "--archives", self.w.archives, "--root", self.w.root, "--work", self.w.work,
             "--table", os.path.join(self.w.base, "table.json"), "--test-path", self.w.bin,
             "--test-env", "STORE_TEST_ROOT=" + self.w.root, "--no-remove", os.path.join(self.w.base, "no-remove"),
+            "--os-release", self.os_release,
             *extra))
 
     def tearDown(self):
@@ -94,7 +97,15 @@ class Remove(unittest.TestCase):
         with open(os.path.join(self.w.swizzin, "scripts", "remove", "demo.sh"), "a") as f:
             f.write("# changed by an update of Swizzin\n")
         self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "script-changed")
-        self.w.apps["demo"]["tested"] = False
+        with open(self.os_release, "w") as f:  # tested on Ubuntu 24.04 only
+            f.write("VERSION_CODENAME=bookworm\n")
+        self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "other-system")
+        c = self.conn()
+        c.send(op="remove-preview", app="demo")
+        self.assertEqual(c.until(lambda m: "error" in m)["error"], "not-removable")
+        os.unlink(self.os_release)  # a system that does not say what it is
+        self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "other-system")
+        self.w.apps["demo"]["tested"] = []
         self.w.write_table()
         self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "untested")
 
