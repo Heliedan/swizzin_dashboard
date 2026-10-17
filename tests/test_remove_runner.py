@@ -273,8 +273,8 @@ class Runner(unittest.TestCase):
         result = self.w.run()
         self.assertEqual(result["result"], "incomplete")
         checks = self.w.checks(result)
-        self.assertFalse(checks["lock file removed"])
-        self.assertFalse(checks["files removed"])  # /opt/demo is still there
+        self.assertFalse(checks["lock"])
+        self.assertFalse(checks["files"])  # /opt/demo is still there
         self.assertTrue(os.path.exists(result["archive"]))  # but the settings it deleted are in the copy
         self.assertIn("home/alice/.config/demo/config.toml", self.w.members(result["archive"]))
 
@@ -291,7 +291,7 @@ class Runner(unittest.TestCase):
         self.w.app("demo", 'printf "Unexpected question? "; read -r x < /dev/tty\n', **self.w.apps["demo"])
         result = self.w.run("demo", "--quiet-timeout", "2", timeout=60)
         self.assertEqual(result["result"], "incomplete")
-        self.assertFalse(self.w.checks(result)["script finished in time"])
+        self.assertFalse(self.w.checks(result)["script"])
 
     def test_stop_before_the_script_puts_everything_back(self):
         p = self.w.start(STORE_TEST_PAUSE="copy:3")
@@ -347,8 +347,8 @@ class Runner(unittest.TestCase):
         result = self.w.run()
         self.assertEqual(result["result"], "incomplete")
         checks = self.w.checks(result)
-        self.assertFalse(checks["kept files still there"])
-        self.assertFalse(checks["no other package removed"])
+        self.assertFalse(checks["kept"])
+        self.assertFalse(checks["other-packages"])
 
     def test_nginx_broken_before_is_not_blamed(self):
         self.w.state["nginx_ok"] = False

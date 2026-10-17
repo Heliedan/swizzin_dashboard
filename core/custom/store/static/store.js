@@ -272,7 +272,7 @@
     (done.checks || []).forEach(function (c) {
       var li = document.createElement("li");
       li.className = c.ok ? "text-success" : "text-danger";
-      li.textContent = (c.ok ? "✓ " : "✗ ") + c.id + (c.detail ? ": " + c.detail : "");
+      li.textContent = (c.ok ? "✓ " : "✗ ") + (c.label || c.id) + (c.detail ? ": " + c.detail : "");
       list.appendChild(li);
     });
     el("store-remove-message").textContent = done.result === "failed" && done.message ?

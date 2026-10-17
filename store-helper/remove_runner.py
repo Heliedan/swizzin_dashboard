@@ -216,9 +216,10 @@ class Removal:
         if pause.startswith(phase + ":"):
             time.sleep(float(pause.split(":", 1)[1]))
 
-    def check(self, key, ok, detail=""):
-        self.checks.append({"id": key, "ok": bool(ok), "detail": detail})
-        say(("✓ " if ok else "✗ ") + key + (": " + detail if detail else ""))
+    def check(self, key, label, ok, detail=""):
+        """One point of the result: a stable id (for programs), and what the user reads."""
+        self.checks.append({"id": key, "label": label, "ok": bool(ok), "detail": detail})
+        say(("✓ " if ok else "✗ ") + label + (": " + detail if detail else ""))
         return ok
 
     def on_sigint(self, *_):
@@ -756,35 +757,37 @@ class Removal:
 
     def phase_verify(self, timed_out):
         self.step("verify", "5/5 Checking the result...")
-        self.check("script finished in time", not timed_out)
-        self.check("lock file removed", not os.path.exists(os.path.join(self.opts.locks, "." + self.app + ".lock")))
+        self.check("script", "Swizzin's remove script finished", not timed_out,
+                   "" if not timed_out else "stopped: it ran too long or waited for an answer")
+        self.check("lock", "Swizzin no longer lists it as installed",
+                   not os.path.exists(os.path.join(self.opts.locks, "." + self.app + ".lock")))
         loaded = [u for u in self.instances
                   if command("systemctl", "show", "-p", "LoadState", "--value", u)[1].strip() not in ("", "not-found")]
-        self.check("services removed", not loaded, ", ".join(loaded))
+        self.check("units", "Its services are gone", not loaded, ", ".join(loaded))
         running = self.processes_left()
-        self.check("no process left", not running, ", ".join(running))
+        self.check("processes", "None of its programs still runs", not running, ", ".join(running))
         after = self.installed_packages()
         still = sorted(name for name, status in self.packages_before.items()
                        if self.is_installed(status) and self.is_installed(after.get(name, ""))
                        and any(fnmatch.fnmatchcase(name, spec) for spec in self.entry.packages))
-        self.check("packages removed", not still, ", ".join(still))
+        self.check("packages", "Its packages are removed", not still, ", ".join(still))
         others = sorted(name for name, status in self.packages_before.items()
                         if self.is_installed(status) and not self.is_installed(after.get(name, ""))
                         and not any(re.fullmatch(r, name) for r in self.entry.allowed))
-        self.check("no other package removed", not others, ", ".join(others))
+        self.check("other-packages", "No other package was removed", not others, ", ".join(others))
         left = [p for p in self.gone_paths if os.path.lexists(self.real(p))]
-        self.check("files removed", not left, ", ".join(left))
+        self.check("files", "Its files are deleted", not left, ", ".join(left))
         missing = [p for p in self.kept_paths if not os.path.lexists(self.real(p))]
-        self.check("kept files still there", not missing, ", ".join(missing))
+        self.check("kept", "What it keeps is still there", not missing, ", ".join(missing))
         nginx_left = [p for p in self.expand(self.entry.nginx) if os.path.lexists(self.real(p))]
-        self.check("web address removed", not nginx_left, ", ".join(nginx_left))
+        self.check("web", "Its web page is no longer served", not nginx_left, ", ".join(nginx_left))
         if self.nginx_installed():
             ok = command("nginx", "-t")[0] == 0
-            self.check("nginx configuration valid", ok or not self.nginx_before,
+            self.check("nginx", "The web server's configuration is valid", ok or not self.nginx_before,
                        "" if ok else ("broken before the removal already" if not self.nginx_before else "nginx -t fails"))
         if self.ports:
             busy = self.listening_ports_any() & self.ports
-            self.check("ports released", not busy, ", ".join(sorted(busy)))
+            self.check("ports", "Its ports are free again", not busy, ", ".join(sorted(busy)))
 
     def processes_left(self):
         programs = [self.real(p) for p in self.gone_paths]
