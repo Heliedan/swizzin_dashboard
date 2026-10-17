@@ -7,7 +7,6 @@ Run from the repository root: python tests/test_remove_runner.py
 """
 import fcntl
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -178,10 +177,11 @@ class Runner(unittest.TestCase):
         result = self.w.run()
         self.assertEqual(result["result"], "removed", self.w.output)
         self.assertTrue(all(self.w.checks(result).values()), result["checks"])
-        # the app was stopped and disabled before its script ran, by systemd unit
+        # the app was stopped before its script ran, by systemd unit, and not disabled by the runner: disabling
+        # reloads systemd, which on Ubuntu often starts the automatic updates at once (the script disables it)
         calls = self.w.calls()
         self.assertLess(calls.index("systemctl stop demo.service"), calls.index("systemctl disable --now -q demo"))
-        self.assertIn("systemctl disable demo.service", calls)
+        self.assertNotIn("systemctl disable demo.service", calls[:calls.index("systemctl disable --now -q demo")])
         self.assertIn("systemctl reload nginx", calls[calls.index("systemctl disable --now -q demo") + 1:])
         # what Swizzin's script forgot is done, what it must not touch is still there
         self.assertFalse(os.path.exists(self.w.path("/etc/systemd/system/demo.service")))
@@ -245,6 +245,55 @@ class Runner(unittest.TestCase):
         self.w.state["apt_daily"] = "activating"
         self.w.save()
         self.assertIn("automatic system updates", self.w.run()["message"])
+
+    def wait_phase(self, phase):
+        for _ in range(200):
+            if os.path.exists(os.path.join(self.w.base, "state.json")) and \
+                    json.load(open(os.path.join(self.w.base, "state.json")))["phase"] == phase:
+                return
+            time.sleep(0.05)
+        self.fail("never reached " + phase)
+
+    def apt_daily(self, value):
+        state = self.w.load()
+        state["apt_daily"] = value
+        self.w.save()
+
+    def test_apt_busy_after_the_copy_is_waited_for(self):
+        p = self.w.start("demo", "--apt-wait", "30", STORE_TEST_PAUSE="copy:1")
+        self.wait_phase("copy")
+        self.apt_daily("activating")  # the automatic updates start meanwhile (Ubuntu does it on its own)
+        time.sleep(4)
+        self.assertIsNone(p.poll())  # waiting, nothing removed yet
+        self.assertTrue(os.path.exists(self.w.path("/home/alice/.config/demo/config.toml")))
+        self.apt_daily("inactive")
+        out = p.communicate(timeout=60)[0].decode()
+        self.assertIn("Waiting for apt to be free (automatic system updates", out)
+        self.assertEqual(self.w.result()["result"], "removed", out)
+
+    def test_apt_busy_too_long_after_the_copy_puts_everything_back(self):
+        p = self.w.start("demo", "--apt-wait", "3", STORE_TEST_PAUSE="copy:1")
+        self.wait_phase("copy")
+        self.apt_daily("activating")
+        out = p.communicate(timeout=60)[0].decode()
+        result = self.w.result()
+        self.assertEqual(result["result"], "failed", out)
+        self.assertIn("automatic system updates", result["message"])
+        state = self.w.load()["units"]["demo.service"]
+        self.assertEqual((state["active"], state["enabled"]), ("active", "enabled"))
+        self.assertTrue(os.path.exists(self.w.path("/home/alice/.config/demo/config.toml")))
+
+    def test_stop_while_waiting_for_apt_puts_everything_back(self):
+        p = self.w.start("demo", "--apt-wait", "60", STORE_TEST_PAUSE="copy:1")
+        self.wait_phase("copy")
+        self.apt_daily("activating")
+        time.sleep(3)
+        p.send_signal(signal.SIGINT)  # the page's Stop
+        out = p.communicate(timeout=60)[0].decode()
+        result = self.w.result()
+        self.assertEqual(result["result"], "failed", out)
+        self.assertIn("stopped at your request", result["message"])
+        self.assertEqual(self.w.load()["units"]["demo.service"]["active"], "active")
 
     def test_apt_that_would_take_another_package_refuses(self):
         self.w.state["packages"].update({"demo-server": "ii ", "other-app": "ii "})

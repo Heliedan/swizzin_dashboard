@@ -107,6 +107,10 @@ FAILURES = [
     dict(key="panne-crash-copie", helper_args=PAUSE(30),
          on_phase=[["copy", "sleep 3; systemctl kill --kill-whom=main --signal=SIGKILL swizzin-store"]],
          expect="put-back", text="put back"),
+    # the automatic updates start between the checks and Swizzin's script (a systemd reload can trigger them):
+    # the removal waits for them, then goes on
+    dict(key="panne-apt-pendant-copie", helper_args=PAUSE(10),
+         on_phase=[["copy", SLOW_APT_DAILY.replace("sleep 900", "sleep 25")]], expect="consistent"),
     dict(key="panne-redemarrage-script", app="transmission",
          on_phase=[["remove", "sleep 2; systemctl restart swizzin-store"]], expect="consistent"),
     dict(key="panne-nginx-casse", before="echo 'campagne_casse;' > /etc/nginx/apps/campagne-casse.conf",

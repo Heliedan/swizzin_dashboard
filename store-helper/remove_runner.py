@@ -5,8 +5,10 @@ Steps, each checked before the next one, with the state saved after each (--stat
 at the end (--result) for the service:
   check   nothing is touched yet: Swizzin's files are the audited ones, apt and dpkg are idle, apt would remove
           nothing but the app's own packages, every path is safe to copy and delete, there is room for the copy
-  stop    the app's units are stopped and disabled (their state is noted, to put them back if needed)
-  copy    the app's settings are saved in an archive, then read back and checked
+  stop    the app's units are stopped, not disabled: disabling reloads systemd, and on Ubuntu a reload often
+          starts the automatic updates (apt-daily) at once; the remove script disables them itself
+  copy    the app's settings are saved in an archive, then read back and checked; if apt became busy (the
+          automatic updates), the removal waits for it (APT_WAIT at most), Stop still possible
   remove  the app's own Swizzin remove script runs (a private copy of the audited bytes), in Swizzin's
           environment, as box would run it, but without box's system-wide apt autoremove
   fix     what Swizzin's scripts forget: units left behind, nginx not reloaded
@@ -46,6 +48,7 @@ APT_LOCKS = ("/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/cache/ap
 APT_UNITS = ("apt-daily.service", "apt-daily-upgrade.service")
 APT_PROCESSES = {"apt", "apt-get", "aptitude", "dpkg", "box"}
 MARGIN = 256 * 1024 * 1024  # free space kept on top of the copy
+APT_WAIT = 600  # seconds the removal waits, before Swizzin's script, for apt to be free (the automatic updates)
 
 
 class Refused(Exception):
@@ -65,6 +68,7 @@ def options(argv=None):
     p.add_argument("--work", default="/root", help="where the private copy of the script is written")
     p.add_argument("--timeout", type=int, default=2700, help="seconds the remove script may run")
     p.add_argument("--quiet-timeout", type=int, default=900, help="seconds the remove script may print nothing")
+    p.add_argument("--apt-wait", type=int, default=APT_WAIT, help="seconds to wait for apt to be free before the script")
     p.add_argument("--retry", action="store_true", help="try again after an incomplete removal (the lock may be gone)")
     return p.parse_args(argv)
 
@@ -451,10 +455,7 @@ class Removal:
             return
         units = sorted(self.instances)
         self.stopped = True
-        command("systemctl", "stop", *units)
-        enabled = [u for u in units if self.instances[u]["enabled"]]
-        if enabled:
-            command("systemctl", "disable", *enabled)
+        command("systemctl", "stop", *units)  # not disable: it reloads systemd, which can start apt-daily
         for unit in units:  # a unit with KillMode=process can leave its children behind
             group = command("systemctl", "show", "-p", "ControlGroup", "--value", unit)[1].strip()
             procs = os.path.join("/sys/fs/cgroup", group.lstrip("/"), "cgroup.procs") if group else ""
@@ -469,9 +470,10 @@ class Removal:
         """Before the remove script: the app as it was."""
         if not self.stopped:
             return
-        enabled = [u for u, s in self.instances.items() if s["enabled"]]
+        enabled = [u for u, s in self.instances.items()
+                   if s["enabled"] and command("systemctl", "is-enabled", u)[1].strip() != "enabled"]
         active = [u for u, s in self.instances.items() if s["active"]]
-        if enabled:
+        if enabled:  # normally none: they were only stopped
             command("systemctl", "enable", *enabled)
         if active:
             command("systemctl", "start", *active)
@@ -628,6 +630,22 @@ class Removal:
         return "\n".join(lines) + "\n"
 
     # --- 4. remove ---------------------------------------------------------------------------
+
+    def wait_for_apt(self):
+        """Ubuntu's automatic updates (apt-daily) start at odd times: when apt became busy since the checks, wait
+        for it, while nothing is removed and Stop still puts everything back."""
+        busy = self.apt_busy()
+        if not busy:
+            return
+        say("Waiting for apt to be free (%s), %d minutes at most..." % (busy, max(1, self.opts.apt_wait // 60)))
+        end = time.monotonic() + self.opts.apt_wait
+        while busy and time.monotonic() < end:
+            self.stop_point()
+            time.sleep(min(5, max(0.2, end - time.monotonic())))
+            busy = self.apt_busy()
+        if busy:
+            raise Refused(busy + ": try again later")
+        say("apt is free again.")
 
     def recheck(self):
         """Just before the script: nothing changed since the checks (the app did not start again, Swizzin's files)."""
@@ -831,6 +849,8 @@ class Removal:
             self.phase_stop()
             self.stop_point()
             self.phase_copy()
+            self.stop_point()
+            self.wait_for_apt()
             self.stop_point()
             timed_out = self.phase_remove()
         except Refused as e:
