@@ -4,6 +4,8 @@
 Run as root inside the container, with the system Python (standard library only):
   python3 -I client.py <app> <transcript file> [answers]   install <app>, print one JSON line with the outcome
   python3 -I client.py --catalogue                          print the helper's catalogue
+  python3 -I client.py --preview <app>                      print the helper's answer to remove-preview
+  python3 -I client.py --remove <app> <transcript> [extra]  uninstall <app> (see remove() and remove.py)
 
 The installation goes through the helper's socket, like the panel. Questions are answered with their
 default (Enter), or with a throwaway password when a password is asked, or with the answer given for
@@ -16,6 +18,7 @@ import os
 import re
 import select
 import socket
+import subprocess
 import sys
 import time
 
@@ -82,12 +85,16 @@ class Helper:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(SOCKET)
         self.buf = b""
+        self.pending = []  # messages received after an answer, not yet handled
 
     def send(self, obj):
         self.sock.sendall(json.dumps(obj).encode() + b"\n")
 
     def messages(self, timeout):
         """The messages received within `timeout` seconds; None when the helper closed the connection."""
+        if self.pending:
+            messages, self.pending = self.pending, []
+            return messages
         if not select.select([self.sock], [], [], timeout)[0]:
             return []
         chunk = self.sock.recv(65536)
@@ -169,7 +176,89 @@ def install(app, transcript, answers=()):
     return out
 
 
+def until_reply(helper, timeout=120):
+    """The helper's answer to the last operation (the first message with "ok"), or None."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        messages = helper.messages(1)
+        if messages is None:
+            return None
+        for i, msg in enumerate(messages):
+            if "ok" in msg:
+                helper.pending = messages[i + 1:]
+                return msg
+    return None
+
+
+def remove(app, transcript, confirm=None, stop_at=None, on_phase=()):
+    """Uninstall <app> the way the page does: the preview (and its ticket), then the removal with the name typed
+    in. Nothing is ever typed into the terminal, except Ctrl+C (the page's Stop) when the step `stop_at` starts.
+    `on_phase`: [(step, shell command)] run in the background when that step starts (to restart the service...)."""
+    out = {"app": app, "phases": [], "errors": []}
+    helper = Helper()
+    helper.send({"op": "remove-preview", "app": app})
+    reply = until_reply(helper)
+    if not reply or not reply.get("ok"):
+        out.update(preview_error=(reply or {}).get("error", "no-answer"), preview_message=(reply or {}).get("message"))
+        return out
+    out["preview"] = reply["preview"]
+    helper.send({"op": "remove", "app": app, "ticket": reply["ticket"], "confirm": confirm or app.upper(),
+                 "requester": "campaign", "rows": 40, "cols": 120})
+    started = until_reply(helper)
+    if not started or not started.get("ok"):
+        out["start_error"] = (started or {}).get("error", "no-answer")
+        return out
+    out["job"] = started["started"]["id"]
+    start = time.monotonic()
+    done, children = None, []
+    with open(transcript, "w", encoding="utf-8") as log:
+        while done is None:
+            if time.monotonic() - start > TIMEOUT:
+                out["errors"].append("timeout")
+                break
+            messages = helper.messages(0.5)
+            if messages is None:  # the service stopped (a restart of the scenario, or a crash)
+                out["errors"].append("helper-closed")
+                break
+            for msg in messages:
+                if "output" in msg:
+                    log.write(msg["output"])
+                    log.flush()
+                elif "phase" in msg:
+                    out["phases"].append([msg["phase"], round(time.monotonic() - start, 1)])
+                    if msg["phase"] == stop_at:
+                        helper.send({"op": "input", "data": "\x03"})
+                        out["stop_sent"] = msg["phase"]
+                    for step, cmd in on_phase:
+                        if step == msg["phase"]:
+                            children.append(subprocess.Popen(["bash", "-c", cmd], stdout=subprocess.DEVNULL,
+                                                             stderr=subprocess.DEVNULL, start_new_session=True))
+                            out.setdefault("ran", []).append([step, cmd])
+                elif "done" in msg:
+                    done = msg["done"]
+    for child in children:
+        try:
+            child.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            out["errors"].append("on-phase-command-still-running")
+    done = done or {}
+    out.update(result=done.get("result"), checks=done.get("checks"), archive=done.get("archive"),
+               message=done.get("message"), seconds=round(time.monotonic() - start))
+    return out
+
+
 def main():
+    if len(sys.argv) >= 4 and sys.argv[1] == "--remove":
+        app, transcript = sys.argv[2:4]
+        extra = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
+        print(json.dumps(remove(app, transcript, confirm=extra.get("confirm"), stop_at=extra.get("stop_at"),
+                                on_phase=extra.get("on_phase", ()))))
+        return
+    if len(sys.argv) == 3 and sys.argv[1] == "--preview":
+        helper = Helper()
+        helper.send({"op": "remove-preview", "app": sys.argv[2]})
+        print(json.dumps(until_reply(helper) or {"ok": False, "error": "no-answer"}))
+        return
     if sys.argv[1:] == ["--catalogue"]:
         helper = Helper()
         helper.send({"op": "catalogue"})
