@@ -167,8 +167,8 @@ def os_codename(path):
 
 def removal_status(opts, table, app):
     """'ok', or why the App Store does not uninstall this app now: not-offered, untested (not through the
-    campaign yet), other-system (the campaign tested it on other systems only), disabled (by root), script-changed
-    (an update of Swizzin changed a file it would run)."""
+    campaign yet), other-system (the campaign tested it on other systems only), disabled (by root), conflict (an
+    installed app that its removal would harm), script-changed (an update of Swizzin changed a file it would run)."""
     common, pins, apps = table
     entry = apps.get(app)
     if entry is None:
@@ -179,6 +179,8 @@ def removal_status(opts, table, app):
         return "other-system"
     if os.path.exists(opts.no_remove):
         return "disabled"
+    if any(os.path.exists(os.path.join(opts.locks, "." + other + ".lock")) for other in entry.refuse_if):
+        return "conflict"
     for rel in common + entry.sources + (removable.script(app),):
         try:
             with open(os.path.join(opts.swizzin, rel), "rb") as f:

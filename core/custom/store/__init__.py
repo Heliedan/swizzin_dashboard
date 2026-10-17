@@ -123,6 +123,10 @@ REMOVE_TEXTS = {
                      "Transmission's torrent list."),
 }
 # Installed apps that may use it, and would stop working with it.
+# Why an app cannot be uninstalled while another one is installed (refuse_if in store-helper/removable.py).
+REMOVE_CONFLICT = {
+    "qbittorrent": "Not while Deluge is installed: removing qBittorrent this way would also remove a library Deluge uses.",
+}
 REMOVE_AFFECTS = {"qbittorrent": ["qui", "autobrr"], "plex": ["tautulli"], "radarr": ["bazarr"],
                   "jackett": ["sonarr", "radarr", "lidarr", "medusa", "sickgear", "mylar", "autobrr"],
                   "prowlarr": ["sonarr", "radarr", "lidarr"],
@@ -144,6 +148,7 @@ REMOVE_STATUS = {
     "not-offered": "The App Store does not uninstall this app: use box remove over SSH.",
     "untested": "Uninstalling it from here is not offered yet.",
     "other-system": "Uninstalling it from here was tested on Ubuntu 24.04 only, not on this system.",
+    "conflict": "Not while another installed app depends on what its removal takes away.",
     "disabled": "Uninstalling from the App Store is turned off on this server.",
     "script-changed": "An update of Swizzin changed its removal since the App Store checked it: uninstall it over "
                       "SSH, or update the App Store.",
@@ -198,6 +203,8 @@ def remove_info(name, status, installed, pretty):
         reason = REMOVE_STATUS.get(status, REMOVE_STATUS["not-offered"])
         if status == "not-offered" and name in REMOVE_SSH_ONLY:
             reason = "Uninstall it over SSH only: " + REMOVE_SSH_ONLY[name]
+        elif status == "conflict":
+            reason = REMOVE_CONFLICT.get(name, reason)
         return status, reason, None, None, []
     removed, kept = REMOVE_TEXTS.get(name, (pretty + " and its settings.", ""))
     affects = [pretty_of(a) for a in REMOVE_AFFECTS.get(name, []) if a in installed]

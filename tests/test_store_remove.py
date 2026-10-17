@@ -63,9 +63,12 @@ class Remove(unittest.TestCase):
         return c
 
     def catalogue(self):
-        c = self.conn()
-        c.send(op="catalogue")
-        return c.until(lambda m: "apps" in m)
+        c = Conn(self.helper.path)  # closed at once: the helper takes 8 panel connections at most
+        try:
+            c.send(op="catalogue")
+            return c.until(lambda m: "apps" in m)
+        finally:
+            c.close()
 
     def preview(self, c, app="demo"):
         c.send(op="remove-preview", app=app)
@@ -94,6 +97,16 @@ class Remove(unittest.TestCase):
         open(os.path.join(self.w.base, "no-remove"), "w").close()  # root turned uninstalling off
         self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "disabled")
         os.unlink(os.path.join(self.w.base, "no-remove"))
+        self.w.apps["demo"]["refuse_if"] = ["other"]  # its removal would harm "other" (qBittorrent and Deluge)
+        self.w.write_table()
+        open(self.w.path("/install/.other.lock"), "w").close()
+        self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "conflict")
+        c = self.conn()
+        c.send(op="remove-preview", app="demo")
+        self.assertEqual(c.until(lambda m: "error" in m)["error"], "conflict")  # no confirmation to fill for nothing
+        os.unlink(self.w.path("/install/.other.lock"))
+        self.w.apps["demo"]["refuse_if"] = []
+        self.w.write_table()
         with open(os.path.join(self.w.swizzin, "scripts", "remove", "demo.sh"), "a") as f:
             f.write("# changed by an update of Swizzin\n")
         self.assertEqual({a["name"]: a for a in self.catalogue()["apps"]}["demo"]["remove"], "script-changed")

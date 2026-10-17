@@ -69,6 +69,7 @@
     "script-changed": "An update of Swizzin changed this app's removal since the App Store checked it: uninstall it " +
       "over SSH, or update the App Store.",
     "disabled": "Uninstalling from the App Store is turned off on this server.",
+    "conflict": "Not possible while another installed app depends on it: see its card.",
     "bad-ticket": "This confirmation had expired: it was renewed, confirm again.",
     "confirm-mismatch": "Type the application's name exactly as shown."
   };

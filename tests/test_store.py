@@ -236,10 +236,12 @@ class UninstallTexts(unittest.TestCase):
         apps = [{"name": "rtorrent", "installed": True, "remove": "not-offered"},
                 {"name": "bazarr", "installed": True, "remove": "script-changed"},
                 {"name": "radarr", "installed": True, "remove": "disabled"},
+                {"name": "qbittorrent", "installed": True, "remove": "conflict"},
                 {"name": "sonarr", "installed": False, "remove": None}]
         self.assertIn("over SSH only: it would also remove ruTorrent and Flood", self.entry(apps, "rtorrent")["remove_reason"])
         self.assertIn("An update of Swizzin changed", self.entry(apps, "bazarr")["remove_reason"])
         self.assertIn("turned off on this server", self.entry(apps, "radarr")["remove_reason"])
+        self.assertIn("Not while Deluge is installed", self.entry(apps, "qbittorrent")["remove_reason"])
         self.assertIsNone(self.entry(apps, "sonarr")["remove"])  # not installed: nothing to say
 
     def test_an_older_helper_without_uninstall_shows_nothing(self):
@@ -253,6 +255,7 @@ class UninstallTexts(unittest.TestCase):
         import removable
         self.assertEqual(set(store.REMOVE_TEXTS), set(removable.APPS))
         self.assertEqual(set(store.REMOVE_SSH_ONLY), set(removable.EXCLUDED))
+        self.assertEqual(set(store.REMOVE_CONFLICT), {a for a, e in removable.APPS.items() if e.refuse_if})
 
 
 if __name__ == "__main__":
