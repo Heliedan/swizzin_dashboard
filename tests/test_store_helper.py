@@ -107,6 +107,7 @@ class StoreHelper(unittest.TestCase):
         self.assertEqual(apps["letsencrypt"]["description"], "")  # an exact key, not a prefix
         self.assertEqual({n for n, a in apps.items() if a["installed"]}, {"jellyfin", "nginx"})
         self.assertEqual({n for n, a in apps.items() if a["blocked"]}, {"letsencrypt", "nginx"})
+        self.assertIn("install", reply["features"])  # the panel shows only what this version can do
 
     def test_list_is_read_again_at_each_request(self):
         with self.helper.connect() as s:

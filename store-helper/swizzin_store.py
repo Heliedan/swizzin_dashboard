@@ -8,7 +8,8 @@ few fixed operations and never runs a command, a path or an environment that com
 from the client. Only root and the panel user may connect (checked with SO_PEERCRED).
 
 Operations:
-  {"op": "catalogue"}                    -> {"ok", "apps": [{name, description, installed, blocked}], "job", "last"}
+  {"op": "catalogue"}                    -> {"ok", "apps": [{name, description, installed, blocked}], "job", "last",
+                                             "features": what this version can do}
   {"op": "install", "app", "rows", "cols"} -> {"ok", "started": job, "control_key"} or {"ok": false, "error"}
   {"op": "attach", "control_key"|"take"}   -> {"ok", "attached": job, "controller"}, then {"output"}, {"phase"}, {"done"}
   {"op": "input", "data"} / {"op": "resize", "rows", "cols"}   (from the connection that controls the job only)
@@ -54,6 +55,7 @@ MAX_INPUT = 4096
 REPLAY = 512 * 1024
 MAX_LOG = 50 * 1024 * 1024
 KEEP_LOGS = 20
+FEATURES = ["install"]  # tells the panel which operations this version of the service offers
 # The installers' whole environment: nothing comes from the client or from this service's own
 # environment (scripts read common names such as user, pass or log). PATH ends like root's over SSH
 # (Swizzin adds /usr/local/bin/swizzin in .bashrc). TERM is required: without
@@ -142,8 +144,9 @@ class Client:
 class Job:
     """One installation: `box install <app>`, then `box test <app>` if the app's lock appeared."""
 
-    def __init__(self, opts, app, size):
+    def __init__(self, opts, app, size, action="install"):
         self.app = app
+        self.action = action  # install (or remove, later): the page words its messages after it
         self.id = time.strftime("%Y%m%d-%H%M%S") + "-" + app
         self.key = secrets.token_urlsafe(24)
         self.phase = "install"  # install, then test, then done
@@ -168,7 +171,8 @@ class Job:
         self.logged = 0
 
     def summary(self):
-        return {"id": self.id, "app": self.app, "phase": self.phase, "result": self.result, "test": self.test,
+        return {"id": self.id, "app": self.app, "action": self.action, "phase": self.phase, "result": self.result,
+                "test": self.test,
                 "generic_test": self.generic_test, "retested": self.retested, "started": int(self.started),
                 "ended": int(self.ended) if self.ended else None}
 
@@ -330,7 +334,8 @@ class Helper:
     def _op_catalogue(self, c, msg):
         running = self.job.summary() if self.job is not None and self.job.phase != "done" else None
         try:
-            self._send(c, {"ok": True, "apps": catalogue(self.opts), "job": running, "last": self.last})
+            self._send(c, {"ok": True, "apps": catalogue(self.opts), "job": running, "last": self.last,
+                           "features": FEATURES})
         except OSError as e:
             log.error("catalogue: %s", e)
             self._send(c, {"ok": False, "error": "unreadable"})
@@ -576,6 +581,7 @@ class Helper:
                 last = json.load(f)
         except (OSError, ValueError):
             return
+        last.setdefault("action", "install")  # saved by a version that only installed
         if last.get("phase") != "done":
             last.update(phase="done", result="interrupted")
             with open(summaries[-1], "w") as f:

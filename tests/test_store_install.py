@@ -151,6 +151,7 @@ class Install(unittest.TestCase):
         c, started = self.install("sonarr", rows=24, cols=80)
         self.assertTrue(started["ok"])
         self.assertTrue(started["control_key"])
+        self.assertEqual(started["started"]["action"], "install")
         c.wait_output("Continue? (y/n)")
         self.assertIn("size 24 80", c.output)
         c.send(op="resize", rows=40, cols=120)
@@ -159,6 +160,7 @@ class Install(unittest.TestCase):
         self.assertEqual(phase, {"phase": "test", "generic_test": False})
         done = self.done(c)
         self.assertEqual((done["result"], done["test"], done["generic_test"]), ("installed", "passed", False))
+        self.assertEqual(done["action"], "install")
         self.assertFalse(done["retested"])  # passed the first time: checked once
         self.assertIn("size 40 120", c.output)  # the installer saw the new window size
         self.assertIn("checking sonarr", c.output)
@@ -408,7 +410,9 @@ class Install(unittest.TestCase):
         self.helper = Helper(self.base, extra=self.extra)
         c = self.conn()
         c.send(op="catalogue")
-        self.assertEqual(c.recv()["last"]["result"], "interrupted")
+        last = c.recv()["last"]
+        self.assertEqual(last["result"], "interrupted")
+        self.assertEqual(last["action"], "install")  # a summary saved before actions existed
 
 
 if __name__ == "__main__":
