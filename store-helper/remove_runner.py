@@ -51,6 +51,14 @@ MARGIN = 256 * 1024 * 1024  # free space kept on top of the copy
 APT_WAIT = 600  # seconds the removal waits, before Swizzin's script, for apt to be free (the automatic updates)
 
 
+def in_this_system(pid, proc="/proc"):
+    """False for a process of a container (another PID namespace): its programs and its apt are not this server's."""
+    try:
+        return os.readlink("%s/%s/ns/pid" % (proc, pid)) == os.readlink("%s/self/ns/pid" % proc)
+    except OSError:
+        return True  # cannot tell: counted
+
+
 class Refused(Exception):
     """The removal cannot go on: nothing was removed (what was stopped is started again)."""
 
@@ -291,7 +299,7 @@ class Removal:
             if command("systemctl", "is-active", unit)[1].strip() in ("active", "activating"):
                 return "automatic system updates are running (%s)" % unit
         for pid in os.listdir("/proc"):
-            if pid.isdigit():
+            if pid.isdigit() and in_this_system(pid):
                 try:
                     with open("/proc/%s/comm" % pid) as f:
                         name = f.read().strip()
@@ -820,7 +828,7 @@ class Removal:
         programs = [self.real(p) for p in self.gone_paths]
         found = []
         for pid in os.listdir("/proc"):
-            if not pid.isdigit():
+            if not pid.isdigit() or not in_this_system(pid):  # the same program in a Docker container is not the app
                 continue
             try:
                 exe = os.readlink("/proc/%s/exe" % pid)

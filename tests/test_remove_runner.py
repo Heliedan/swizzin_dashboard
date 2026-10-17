@@ -459,5 +459,45 @@ class Pieces(unittest.TestCase):
         self.assertIn("not enough free space", str(e.exception))
 
 
+    def program(self, path):
+        """A real process whose program lies at path in the fake root (a copy of sleep)."""
+        real = self.w.path(path)
+        os.makedirs(os.path.dirname(real), exist_ok=True)
+        shutil.copy(shutil.which("sleep"), real)
+        p = subprocess.Popen([real, "60"])
+        self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
+        return p
+
+    def in_a_container(self, p):
+        """in_this_system as if p ran in a Docker container (another PID namespace)."""
+        here = remove_runner.in_this_system
+        return mock.patch.object(remove_runner, "in_this_system", lambda pid: pid != str(p.pid) and here(pid))
+
+    def test_in_this_system_compares_pid_namespaces(self):
+        proc = os.path.join(self.w.base, "proc")
+        for pid, ns in (("self", "pid:[1]"), ("10", "pid:[1]"), ("20", "pid:[2]")):
+            os.makedirs(os.path.join(proc, pid, "ns"))
+            os.symlink(ns, os.path.join(proc, pid, "ns", "pid"))
+        self.assertTrue(remove_runner.in_this_system("10", proc))
+        self.assertFalse(remove_runner.in_this_system("20", proc))  # a container's process
+        self.assertTrue(remove_runner.in_this_system("30", proc))  # cannot tell: counted
+        self.assertTrue(remove_runner.in_this_system(str(os.getpid())))
+
+    def test_the_same_program_in_a_container_is_not_left_behind(self):
+        p = self.program("/opt/demo/demo-server")
+        self.r.gone_paths = ["/opt/demo"]
+        self.assertEqual(self.r.processes_left(), ["demo-server (pid %d)" % p.pid])
+        with self.in_a_container(p):
+            self.assertEqual(self.r.processes_left(), [])
+
+    def test_apt_in_a_container_does_not_hold_this_server(self):
+        p = self.program("/opt/tools/apt-get")
+        with mock.patch.dict(os.environ, self.w.env()):
+            self.assertEqual(self.r.apt_busy(), "apt-get is running")
+            with self.in_a_container(p):
+                self.assertIsNone(self.r.apt_busy())
+
+
 if __name__ == "__main__":
     unittest.main()
