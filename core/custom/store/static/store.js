@@ -159,7 +159,15 @@
   function steps() {  // where an uninstallation stands
     var list = el("store-steps");
     list.hidden = !removing();
-    if (!removing() || job.phase === "done") {
+    if (!removing()) {
+      return;
+    }
+    if (job.phase === "done") {  // every step done, or left where it stopped
+      if (job.result === "removed") {
+        Array.prototype.forEach.call(list.querySelectorAll("[data-step]"), function (li) {
+          li.className = "list-inline-item done";
+        });
+      }
       return;
     }
     var at = STEPS.indexOf(job.phase === "fix" ? "verify" : job.phase);
@@ -196,8 +204,11 @@
   function openTerminal() {
     terminal();
     var what = removing() ? "Uninstalling " : "Installing ";
-    el("store-terminal-title").textContent = job ? what + job.app : "Installation";
+    var item = job ? card(job.app) : null;
+    el("store-terminal-title").textContent = job ? what + (item ? item.querySelector(".store-name").textContent : job.app) :
+      "Installation";
     el("store-remove-result").hidden = true;
+    el("store-term").classList.remove("with-result");
     el("store-retry").hidden = true;
     steps();
     controls();
@@ -281,6 +292,8 @@
     el("store-remove-archive").textContent = done.archive || "";
     el("store-remove-archive-line").hidden = !done.archive;
     el("store-remove-result").hidden = false;
+    el("store-term").classList.add("with-result");  // a smaller terminal: the checks and the buttons stay in sight
+    resize();
     var again = el("store-retry");
     again.hidden = done.result !== "incomplete";
     again.setAttribute("data-app", done.app);

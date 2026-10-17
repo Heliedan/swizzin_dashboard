@@ -94,7 +94,7 @@ UNRELIABLE_CHECK = {"bazarr", "btsync", "emby", "filebrowser", "flood", "jackett
 # Uninstalling (store-helper/removable.py decides what is done; this says it in plain words).
 # What goes with the app, and what stays (on top of "your downloads and media are not touched").
 REMOVE_TEXTS = {
-    "airsonic": ("Airsonic and its settings: accounts, playlists, play history.", "Your music."),
+    "airsonic": ("Airsonic and its settings: accounts, playlists, play history.", ""),
     "autobrr": ("autobrr and its settings, for every user: filters, indexers, IRC networks, download clients.", ""),
     "bazarr": ("Bazarr and its settings: providers, languages, subtitle history.",
                "The subtitles it already downloaded, next to your media."),
@@ -106,22 +106,21 @@ REMOVE_TEXTS = {
     "jackett": ("Jackett and its settings: indexers and their logins, API key.", ""),
     "librespeed": ("LibreSpeed.", ""),
     "lidarr": ("Lidarr.", "Its settings and library (~/.config/Lidarr): reinstalling Lidarr finds them again."),
-    "medusa": ("Medusa and its settings: show list, history, providers.", "Your shows."),
+    "medusa": ("Medusa and its settings: show list, history, providers.", ""),
     "mylar": ("Mylar and its settings: watch list, history.", "Your comics."),
     "netronome": ("Netronome and its settings, for every user: speed test history.", ""),
     "nzbhydra": ("NZBHydra and its settings: indexers, history.", ""),
     "organizr": ("Organizr and its settings: tabs, users.", ""),
-    "plex": ("Plex Media Server and its library: settings, watch history, posters and other metadata.", "Your media files."),
+    "plex": ("Plex Media Server and its library: settings, watch history, posters and other metadata.", ""),
     "prowlarr": ("Prowlarr and its settings: indexers, history.", ""),
-    "qbittorrent": ("qBittorrent: its torrents stop.",
-                    "Your downloads, and qBittorrent's settings and torrent list in your home folder."),
+    "qbittorrent": ("qBittorrent: its torrents stop.", "qBittorrent's settings and torrent list, in your home folder."),
     "qui": ("qui and its settings, for every user.", "qBittorrent and its torrents."),
     "radarr": ("Radarr.", "Its settings and library (~/.config/Radarr): reinstalling Radarr finds them again."),
-    "sickgear": ("SickGear and its settings: show list, history.", "Your shows."),
+    "sickgear": ("SickGear and its settings: show list, history.", ""),
     "syncthing": ("Syncthing: syncing stops.", "Its settings, its device identity and every synced folder."),
     "tautulli": ("Tautulli and its settings: watch history, statistics.", "Plex."),
     "transmission": ("Transmission: its torrents stop, and its settings file is deleted for every user.",
-                     "Your downloads, and Transmission's torrent list."),
+                     "Transmission's torrent list."),
 }
 # Installed apps that may use it, and would stop working with it.
 REMOVE_AFFECTS = {"qbittorrent": ["qui", "autobrr"], "plex": ["tautulli"], "radarr": ["bazarr"],

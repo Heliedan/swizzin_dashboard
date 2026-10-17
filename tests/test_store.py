@@ -229,7 +229,7 @@ class UninstallTexts(unittest.TestCase):
         self.assertEqual(e["remove"], "ok")
         self.assertIsNone(e["remove_reason"])
         self.assertIn("its torrents stop", e["removed"])
-        self.assertIn("Your downloads", e["kept"])
+        self.assertIn("torrent list", e["kept"])
         self.assertEqual(e["affects"], ["qui"])  # installed, and uses it; autobrr is not installed
 
     def test_apps_that_are_not_uninstalled_from_here_say_why(self):

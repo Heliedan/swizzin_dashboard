@@ -34,3 +34,5 @@
 .store-steps .done { color: #00bc8c; }
 .store-steps .current { color: #fff; font-weight: bold; }
 .store-result { padding: .5rem 1rem; font-size: .9rem; }
+.store-term.with-result { height: 32vh; min-height: 160px; }
+@media (min-width: 768px) { .store-result ul { column-count: 2; column-gap: 2rem; } }

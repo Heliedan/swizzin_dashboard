@@ -71,8 +71,15 @@ def options(argv=None):
 
 def say(text):
     try:
-        print("\n[App Store] " + text, flush=True)
+        print("[App Store] " + text, flush=True)
     except OSError:  # the terminal is gone (the service stopped): the removal goes on regardless
+        pass
+
+
+def say_newline():
+    try:
+        print(flush=True)
+    except OSError:
         pass
 
 
@@ -726,6 +733,8 @@ class Removal:
         except OSError:
             pass
         os.close(fd)
+        if not tail.endswith("\n"):  # what follows starts on a line of its own
+            say_newline()
         return status, timed_out
 
     # --- 5. fix and verify -------------------------------------------------------------------
