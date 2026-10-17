@@ -84,7 +84,7 @@ NEIGHBOURS = [
     dict(key="voisin-prowlarr-radarr", app="prowlarr", preinstall=["radarr"], watch=["radarr"]),
     dict(key="voisin-radarr-prowlarr", app="radarr", preinstall=["prowlarr"], watch=["prowlarr"]),
     dict(key="voisin-qbittorrent-deluge", app="qbittorrent", preinstall=["qbittorrent", "deluge"], watch=["deluge"],
-         expect="refused", text="deluge is installed"),
+         expect="refused", text="conflict"),  # refused at the preview since f4dc9c4; the card names Deluge
 ]
 
 FAILURES = [
