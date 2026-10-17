@@ -182,6 +182,46 @@ class StorePage(unittest.TestCase):
         self.assertNotIn("store", app.blueprints)
 
 
+class UninstallTexts(unittest.TestCase):
+    """What the page says about uninstalling, from what the helper reports (entries() alone)."""
+
+    def entry(self, apps, name, features=("install", "remove")):
+        with swizzin.app.app_context():
+            return {e["name"]: e for e in store.entries(apps, swizzin.app.static_folder, "noble", features)}[name]
+
+    def test_an_app_that_can_be_uninstalled(self):
+        apps = [{"name": "qbittorrent", "installed": True, "remove": "ok"},
+                {"name": "qui", "installed": True, "remove": "ok"}]
+        e = self.entry(apps, "qbittorrent")
+        self.assertEqual(e["remove"], "ok")
+        self.assertIsNone(e["remove_reason"])
+        self.assertIn("its torrents stop", e["removed"])
+        self.assertIn("Your downloads", e["kept"])
+        self.assertEqual(e["affects"], ["qui"])  # installed, and uses it; autobrr is not installed
+
+    def test_apps_that_are_not_uninstalled_from_here_say_why(self):
+        apps = [{"name": "rtorrent", "installed": True, "remove": "not-offered"},
+                {"name": "bazarr", "installed": True, "remove": "script-changed"},
+                {"name": "radarr", "installed": True, "remove": "disabled"},
+                {"name": "sonarr", "installed": False, "remove": None}]
+        self.assertIn("over SSH only: it would also remove ruTorrent and Flood", self.entry(apps, "rtorrent")["remove_reason"])
+        self.assertIn("An update of Swizzin changed", self.entry(apps, "bazarr")["remove_reason"])
+        self.assertIn("turned off on this server", self.entry(apps, "radarr")["remove_reason"])
+        self.assertIsNone(self.entry(apps, "sonarr")["remove"])  # not installed: nothing to say
+
+    def test_an_older_helper_without_uninstall_shows_nothing(self):
+        apps = [{"name": "bazarr", "installed": True, "remove": "ok"}]
+        e = self.entry(apps, "bazarr", features=("install",))
+        self.assertIsNone(e["remove"])
+        self.assertIsNone(e["remove_reason"])
+
+    def test_every_uninstallable_app_has_its_texts(self):
+        sys.path.insert(0, os.path.join(ROOT, "store-helper"))
+        import removable
+        self.assertEqual(set(store.REMOVE_TEXTS), set(removable.APPS))
+        self.assertEqual(set(store.REMOVE_SSH_ONLY), set(removable.EXCLUDED))
+
+
 if __name__ == "__main__":
     try:
         unittest.main(verbosity=2)

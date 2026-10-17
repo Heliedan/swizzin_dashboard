@@ -7,7 +7,9 @@ relays them to the page over the Socket.IO namespace /store, one helper connecti
 Admin only: the page, the token and the namespace check the admin's Basic login, the
 namespace also wants the page's token, and installing or taking control asks for the admin
 password again (counted with the other failed logins), unless swizzin.cfg says
-STORE_ASK_PASSWORD = False.
+STORE_ASK_PASSWORD = False. Uninstalling always asks for it, and for the app's name typed in:
+the helper saves the app's settings first and removes only the apps it audited (see
+store-helper/removable.py); this module only words what the user is told.
 
 This package lives in core/custom/ so that `box upgrade panel` keeps it. register() runs
 once per import of swizzin.py (it is imported twice at startup), so it creates its own
@@ -89,6 +91,64 @@ NOTES = {
 UNRELIABLE_CHECK = {"bazarr", "btsync", "emby", "filebrowser", "flood", "jackett", "lidarr", "medusa", "organizr",
                     "prowlarr", "quassel", "qui", "radarr", "sickgear", "sonarr", "syncthing"}
 
+# Uninstalling (store-helper/removable.py decides what is done; this says it in plain words).
+# What goes with the app, and what stays (on top of "your downloads and media are not touched").
+REMOVE_TEXTS = {
+    "airsonic": ("Airsonic and its settings: accounts, playlists, play history.", "Your music."),
+    "autobrr": ("autobrr and its settings, for every user: filters, indexers, IRC networks, download clients.", ""),
+    "bazarr": ("Bazarr and its settings: providers, languages, subtitle history.",
+               "The subtitles it already downloaded, next to your media."),
+    "calibreweb": ("Calibre-Web and its settings: accounts, shelves, reading status, Kobo sync.", "Your Calibre library."),
+    "emby": ("Emby.", "Emby's own data (/var/lib/emby): reinstalling Emby finds it again."),
+    "filebrowser": ("File Browser and its settings: accounts, shared links.", "Your files."),
+    "flood": ("Flood and its settings, for every user: accounts, connections to the torrent client.",
+              "rTorrent and its torrents."),
+    "jackett": ("Jackett and its settings: indexers and their logins, API key.", ""),
+    "librespeed": ("LibreSpeed.", ""),
+    "lidarr": ("Lidarr.", "Its settings and library (~/.config/Lidarr): reinstalling Lidarr finds them again."),
+    "medusa": ("Medusa and its settings: show list, history, providers.", "Your shows."),
+    "mylar": ("Mylar and its settings: watch list, history.", "Your comics."),
+    "netronome": ("Netronome and its settings, for every user: speed test history.", ""),
+    "nzbhydra": ("NZBHydra and its settings: indexers, history.", ""),
+    "organizr": ("Organizr and its settings: tabs, users.", ""),
+    "plex": ("Plex Media Server and its library: settings, watch history, posters and other metadata.", "Your media files."),
+    "prowlarr": ("Prowlarr and its settings: indexers, history.", ""),
+    "qbittorrent": ("qBittorrent: its torrents stop.",
+                    "Your downloads, and qBittorrent's settings and torrent list in your home folder."),
+    "qui": ("qui and its settings, for every user.", "qBittorrent and its torrents."),
+    "radarr": ("Radarr.", "Its settings and library (~/.config/Radarr): reinstalling Radarr finds them again."),
+    "sickgear": ("SickGear and its settings: show list, history.", "Your shows."),
+    "syncthing": ("Syncthing: syncing stops.", "Its settings, its device identity and every synced folder."),
+    "tautulli": ("Tautulli and its settings: watch history, statistics.", "Plex."),
+    "transmission": ("Transmission: its torrents stop, and its settings file is deleted for every user.",
+                     "Your downloads, and Transmission's torrent list."),
+}
+# Installed apps that may use it, and would stop working with it.
+REMOVE_AFFECTS = {"qbittorrent": ["qui", "autobrr"], "plex": ["tautulli"], "radarr": ["bazarr"],
+                  "jackett": ["sonarr", "radarr", "lidarr", "medusa", "sickgear", "mylar", "autobrr"],
+                  "prowlarr": ["sonarr", "radarr", "lidarr"],
+                  "nzbhydra": ["sonarr", "radarr", "lidarr", "medusa", "sickgear", "mylar"],
+                  "transmission": ["sonarr", "radarr", "lidarr", "autobrr"]}
+# Installed but not uninstalled from here (store-helper/removable.py, EXCLUDED), and why.
+REMOVE_SSH_ONLY = {
+    "rtorrent": "it would also remove ruTorrent and Flood, and stop all your torrents.",
+    "rutorrent": "it would delete the saved .torrent files, RSS filters and settings of every user.",
+    "deluge": "Swizzin's removal handles only the first user and removes a library other apps use.",
+    "btsync": "Swizzin's removal deletes your synced files.",
+    "nzbget": "Swizzin's removal deletes its downloads.",
+    "jellyfin": "Swizzin's removal can stop halfway and leave Jellyfin installed with no data.",
+    "sonarr": "Swizzin's removal never stops Sonarr and removes packages system-wide.",
+    "quassel": "Swizzin's removal updates apt halfway and can stop there.",
+}
+# Why the helper does not offer to uninstall an installed app right now.
+REMOVE_STATUS = {
+    "not-offered": "The App Store does not uninstall this app: use box remove over SSH.",
+    "untested": "Uninstalling it from here is not offered yet.",
+    "disabled": "Uninstalling from the App Store is turned off on this server.",
+    "script-changed": "An update of Swizzin changed its removal since the App Store checked it: uninstall it over "
+                      "SSH, or update the App Store.",
+}
+
 
 def os_codename(path="/etc/os-release"):
     """'noble', 'bookworm'... or None."""
@@ -130,7 +190,26 @@ def helper_call(request, path, timeout=3):
         raise StoreUnavailable(str(e))
 
 
-def entries(apps, static_folder, codename=None):
+def remove_info(name, status, installed, pretty):
+    """What the page says about uninstalling an installed app: (status, why not, removed, kept, affected)."""
+    if status is None:  # a helper that does not uninstall: nothing is said
+        return None, None, None, None, []
+    if status != "ok":
+        reason = REMOVE_STATUS.get(status, REMOVE_STATUS["not-offered"])
+        if status == "not-offered" and name in REMOVE_SSH_ONLY:
+            reason = "Uninstall it over SSH only: " + REMOVE_SSH_ONLY[name]
+        return status, reason, None, None, []
+    removed, kept = REMOVE_TEXTS.get(name, (pretty + " and its settings.", ""))
+    affects = [pretty_of(a) for a in REMOVE_AFFECTS.get(name, []) if a in installed]
+    return "ok", None, removed, kept, affects
+
+
+def pretty_of(name):
+    profile = getattr(util, name + "_meta", None)
+    return getattr(profile, "pretty_name", None) or PRETTY.get(name, name)
+
+
+def entries(apps, static_folder, codename=None, features=()):
     """What the page shows for each app. The apps the helper does not offer (system components and
     tools set up on the machine itself, see BLOCKED in store-helper/swizzin_store.py) are left out."""
     installed = {a["name"] for a in apps if a.get("installed")}
@@ -142,9 +221,12 @@ def entries(apps, static_folder, codename=None):
         profile = getattr(util, name + "_meta", None)  # the class only: some profiles read files when created
         img = getattr(profile, "img", name)
         icon = "img/apps/{}.png".format(img)
+        pretty = getattr(profile, "pretty_name", None) or PRETTY.get(name, name)
+        status = a.get("remove") if "remove" in features and a.get("installed") else None
+        remove, remove_reason, removed, kept, affects = remove_info(name, status, installed, pretty)
         shown.append({
             "name": name,
-            "pretty": getattr(profile, "pretty_name", None) or PRETTY.get(name, name),
+            "pretty": pretty,
             "description": a.get("description") or DESCRIPTIONS.get(name, ""),
             "installed": bool(a.get("installed")),
             "missing": [r for r in REQUIRES.get(name, []) if r not in installed],
@@ -156,6 +238,11 @@ def entries(apps, static_folder, codename=None):
             # the address of the app's page, completed in the browser like the sidebar does (core/util.py)
             "path": getattr(profile, "baseurl", None),
             "scheme": getattr(profile, "scheme", None),
+            "remove": remove,  # "ok": offered; another value: why not (remove_reason says it)
+            "remove_reason": remove_reason,
+            "removed": removed,
+            "kept": kept,
+            "affects": affects,
         })
     return sorted(shown, key=lambda e: e["pretty"].lower())
 
@@ -240,13 +327,17 @@ def register(app, socketio, htpasswd):
         except StoreUnavailable as e:
             app.logger.warning("App Store helper unavailable: %s", e)
             reply, error = {}, "unavailable"
-        shown = entries(reply.get("apps", []), app.static_folder, os_codename(app.config.get("STORE_OS_RELEASE", "/etc/os-release")))
+        shown = entries(reply.get("apps", []), app.static_folder,
+                        os_codename(app.config.get("STORE_OS_RELEASE", "/etc/os-release")), reply.get("features", ()))
         vendor = "sbio" if os.path.isfile("/install/.sbio.lock") else "swizzin"
         response = flask.make_response(flask.render_template(
             "store/store.html", title="App Store", user=user, pages=util.generate_page_list(user),
             vendor=vendor, apps=shown, error=error, job=reply.get("job"), last=reply.get("last"),
             ask_password=ask_password()))
         response.headers["Cache-Control"] = "no-store"
+        # no other site may show this page in a frame and trick a click on Install or Uninstall
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
         return response
 
     @bp.route("/store/token")
@@ -329,6 +420,32 @@ def register(app, socketio, htpasswd):
             emit("helper", {"ok": False, "error": "password"})
             return
         relay({"op": "install", "app": msg.get("app"), "rows": msg.get("rows"), "cols": msg.get("cols")})
+
+    @socketio.on("remove-preview", namespace="/store")
+    def store_remove_preview(msg):
+        """What the confirmation shows (users, size of the copy), with the helper's one-time ticket."""
+        if not accepted():
+            return
+        msg = msg if isinstance(msg, dict) else {}
+        relay({"op": "remove-preview", "app": msg.get("app")})
+
+    @socketio.on("remove", namespace="/store")
+    def store_remove(msg):
+        """Uninstalling: always the admin password (whatever STORE_ASK_PASSWORD says) and the app's name typed in."""
+        if not accepted():
+            return
+        msg = msg if isinstance(msg, dict) else {}
+        app_name, confirm = msg.get("app"), msg.get("confirm")
+        if not password_ok(msg.get("password")):
+            emit("helper", {"ok": False, "error": "password"})
+            return
+        if not isinstance(app_name, str) or not isinstance(confirm, str) or confirm.strip().lower() != app_name:
+            emit("helper", {"ok": False, "error": "confirm-mismatch"})
+            return
+        auth = flask.request.authorization
+        requester = "{} from {}".format(auth.username if auth else "?", client_address(flask.request.environ))
+        relay({"op": "remove", "app": app_name, "ticket": msg.get("ticket"), "confirm": confirm,
+               "requester": requester, "rows": msg.get("rows"), "cols": msg.get("cols")})
 
     @socketio.on("attach", namespace="/store")
     def store_attach(msg):

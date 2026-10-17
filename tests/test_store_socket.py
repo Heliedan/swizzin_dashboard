@@ -123,6 +123,8 @@ class StoreSocket(unittest.TestCase):
             authorized.clear()  # as if its connect handler had not accepted it
             tab.emit("install", {"app": "sonarr"}, namespace="/store")
             tab.emit("attach", {}, namespace="/store")
+            tab.emit("remove-preview", {"app": "sonarr"}, namespace="/store")
+            tab.emit("remove", {"app": "sonarr", "confirm": "sonarr", "password": "tester"}, namespace="/store")
             eventlet.sleep(0.5)
             self.assertEqual([e for e in tab.get_received("/store") if e["name"] == "helper"], [])
             self.assertEqual(swizzin.app.extensions["store"]["links"], {})  # no helper connection was opened
@@ -215,6 +217,35 @@ class StoreSocket(unittest.TestCase):
             finally:
                 del swizzin.app.config["STORE_ASK_PASSWORD"]
         self.assertFalse(os.path.exists(os.path.join(self.base, "locks", ".sonarr.lock")))
+
+    def test_uninstalling_always_asks_for_the_password(self):
+        swizzin.app.config["STORE_ASK_PASSWORD"] = False  # turns it off for installing, never for uninstalling
+        try:
+            tab = self.tab()
+            tab.emit("remove", {"app": "sonarr", "confirm": "sonarr", "ticket": "x"}, namespace="/store")
+            self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "password"})
+            tab.emit("remove", {"app": "sonarr", "confirm": "sonarr", "password": "wrong"}, namespace="/store")
+            self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "password"})
+        finally:
+            del swizzin.app.config["STORE_ASK_PASSWORD"]
+        self.assertEqual(swizzin.app.extensions["store"]["links"], {})  # nothing reached the helper
+
+    def test_uninstalling_needs_the_apps_name_typed_in(self):
+        tab = self.tab()
+        for confirm in ("", "sonar", "radarr", None, 5):
+            tab.emit("remove", {"app": "sonarr", "confirm": confirm, "password": "tester"}, namespace="/store")
+            self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "confirm-mismatch"},
+                             confirm)
+        self.assertEqual(swizzin.app.extensions["store"]["links"], {})
+
+    def test_uninstall_requests_reach_the_helper(self):
+        tab = self.tab()
+        tab.emit("remove-preview", {"app": "sonarr"}, namespace="/store")
+        # Sonarr is not uninstalled from the App Store (its removal never stops it): the helper says so
+        self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "not-removable"})
+        tab.emit("remove", {"app": "sonarr", "confirm": " Sonarr ", "password": "tester", "ticket": "t"},
+                 namespace="/store")
+        self.assertEqual(self.wait(tab, lambda m: "error" in m)[0], {"ok": False, "error": "not-removable"})
 
     def test_closing_the_tab_closes_its_helper_connection(self):
         tab = self.tab()
