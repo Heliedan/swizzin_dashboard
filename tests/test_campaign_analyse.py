@@ -79,6 +79,9 @@ class Scope(unittest.TestCase):
         self.assertFalse(analyse.under("/home/test/.config", allowed))
         self.assertFalse(analyse.under("/home/test/.config/autobrr2/x", allowed))
         self.assertFalse(analyse.under("/etc/nginx/conf.d/alice.qui.conf", allowed))
+        plex = analyse.scope("plex", json.loads(json.dumps(removable.APPS["plex"].__dict__)), CTX)
+        self.assertTrue(analyse.under("/usr/lib/systemd/system/plexmediaserver.service", plex))  # written by its package
+        self.assertFalse(analyse.under("/usr/lib/systemd/system/nginx.service", plex))
 
     def test_owner_and_master(self):
         lidarr = json.loads(json.dumps(removable.APPS["lidarr"].__dict__))
@@ -114,6 +117,22 @@ class Verdict(unittest.TestCase):
         r["d12"]["packages_removed"]["foo"] = ["1", "ii"]
         self.check(r, "fail", "packages removed that it may not remove")
 
+    def test_a_package_listing_lib_owns_the_file_under_usr_lib(self):
+        r = record()
+        r["d12"]["removed"]["/usr/lib/x86_64-linux-gnu/libfoo.so.1"] = F
+        r["d12"]["owned"]["/lib/x86_64-linux-gnu/libfoo.so.1"] = "foo"  # as dpkg lists it (Syncthing's unit file)
+        self.check(r)
+        r["d12"]["removed"]["/usr/lib/x86_64-linux-gnu/libbar.so.1"] = F  # listed by no package removed
+        self.check(r, "fail", "removed outside its scope")
+
+    def test_the_init_links_of_a_removed_packages_script(self):
+        r = record()  # Transmission: update-rc.d made them, the purge removes them
+        r["d12"]["owned"]["/etc/init.d/transmission-daemon"] = "transmission-daemon"
+        r["d12"]["removed"]["/etc/rc2.d/K01transmission-daemon"] = ["l", 0o777, 0, 0, 0, 0, "../init.d/x"]
+        self.check(r)
+        r["d12"]["removed"]["/etc/rc2.d/K01nginx"] = ["l", 0o777, 0, 0, 0, 0, "../init.d/nginx"]
+        self.check(r, "fail", "removed outside its scope")
+
     def test_packages_installed_or_upgraded_by_a_removal_fail(self):
         r = record()
         r["d12"]["packages_added"]["bar"] = ["1", "ii"]
@@ -135,6 +154,12 @@ class Verdict(unittest.TestCase):
         r = record()
         r["d12"]["removed"]["/var/lib/foo/app.pid"] = F
         self.check(r, "pass", review="runtime file")
+        r = record()  # the .NET runtime's pipes and socket in the user's temporary folder (Lidarr)
+        r["d12"]["removed"]["/home/test/.tmp/clr-debug-pipe-2137-1-in"] = ["p", 0o600, 1000, 1000, 0, 0, None]
+        r["d12"]["removed"]["/home/test/.tmp/dotnet-diagnostic-2137-1-socket"] = ["s", 0o600, 1000, 1000, 0, 0, None]
+        self.check(r, "pass", review="runtime file")
+        r["d12"]["removed"]["/home/test/.tmp/notes.txt"] = F  # a regular file there is still the user's
+        self.check(r, "fail", "removed outside its scope")
 
     def test_witnesses(self):
         r = record()
@@ -199,6 +224,8 @@ class Verdict(unittest.TestCase):
         r = record()
         r["d02"]["added"] = {"/opt/x/y": F, "/home/test/media/campagne-temoin.bin": F}
         r["d02"]["packages_added"] = {"libfoo": ["1", "ii"]}
+        r["d02"]["added"]["/usr/lib/libfoo.so"] = F
+        r["d02"]["owned_added"] = {"/usr/lib/libfoo.so": "libfoo"}  # shown with its package, not as a file
         r["d02"]["added"]["/home/test/torrents"] = D
         r["created"] = ["/home/test/torrents"]  # made by the campaign for its witness files
         v = self.check(r, "pass", review="left by the installation: {'/opt/x/y': 1}")
@@ -285,6 +312,9 @@ class Failures(unittest.TestCase):
         checks = [{"id": "nginx", "ok": True, "detail": "broken before the removal already"}]
         ok = self.failure("nginx-broken", removal={"result": "removed", "checks": checks}, after_fix="0")
         self.assertEqual(ok["verdict"], "pass", ok)
+        ok = self.failure("nginx-broken", removal={"result": "removed", "checks": checks},
+                          after_fix="nginx: configuration file /etc/nginx/nginx.conf test is successful\n0")
+        self.assertEqual(ok["verdict"], "pass", ok)
         bad = self.failure("nginx-broken", removal={"result": "removed", "checks": checks}, after_fix="2")
         self.assertEqual(bad["verdict"], "fail")
 
@@ -301,6 +331,14 @@ class Neighbours(unittest.TestCase):
         v = analyse.verdict_for({"app": "autobrr", "affected": ["qbittorrent"]}, ENTRY, r)
         self.assertEqual(v["verdict"], "pass")  # said in the confirmation: noted for review
         self.assertTrue(v["review"])
+        qbt = json.loads(json.dumps(removable.APPS["qbittorrent"].__dict__))
+        r["watch_after"] = {"qbittorrent": dict(before)}
+        r["d12"]["changed"]["/home/test/.config/qBittorrent/qBittorrent.conf"] = [F, F]  # it runs, it writes
+        self.assertEqual(analyse.verdict_for({"app": "autobrr", "others": [("qbittorrent", qbt)]}, ENTRY, r)["verdict"], "pass")
+        self.assertEqual(analyse.verdict_for({"app": "autobrr"}, ENTRY, r)["verdict"], "fail")
+        r["d12"]["removed"]["/home/test/.config/qBittorrent/qBittorrent.conf"] = F  # gone: never the neighbour's right
+        self.assertEqual(analyse.verdict_for({"app": "autobrr", "others": [("qbittorrent", qbt)]}, ENTRY, r)["verdict"], "fail")
+        del r["d12"]["removed"]["/home/test/.config/qBittorrent/qBittorrent.conf"]
         r["watch_after"] = {"qbittorrent": dict(before, lock=False)}
         self.assertEqual(analyse.verdict_for({"app": "autobrr", "affected": ["qbittorrent"]}, ENTRY, r)["verdict"], "fail")
 

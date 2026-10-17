@@ -30,6 +30,8 @@ def scope(app, entry, ctx):
         name = unit + "*" if unit.endswith("@") else unit
         out += ["/etc/systemd/system/%s.service" % name, "/etc/systemd/system/*.wants/%s.service" % name,
                 "/etc/systemd/system/%s.service.d" % name]
+        # a package may write its unit file there in its own scripts, without listing it (Plex)
+        out += ["%s/systemd/system/%s.service" % (lib, name) for lib in ("/usr/lib", "/lib")]
     return out + ["/install/.%s.lock" % app, "/var/lib/swizzin/db/%s" % app]
 
 
@@ -61,23 +63,38 @@ def tops(paths, depth=4):
     return dict(sorted(out.items()))
 
 
-def judge_files(app, entry, ctx, d12):
-    """(fail, review) for what disappeared, changed or appeared during the removal."""
+def merged(paths):
+    """Packages may list /lib/... or /bin/...: on today's systems these are links to /usr/lib and /usr/bin. And the
+    links /etc/rcN.d/[SK]NN<script> are made by the package's own scripts for its /etc/init.d/<script>."""
+    out = set(paths)
+    out.update("/usr" + p for p in paths if p.startswith(("/lib/", "/bin/", "/sbin/", "/lib64/", "/lib32/", "/libx32/")))
+    scripts = [p[len("/etc/init.d/"):] for p in paths if p.startswith("/etc/init.d/") and p.count("/") == 3]
+    out.update("/etc/rc%s.d/%s%02d%s" % (level, kind, n, s) for s in scripts for level in "0123456S" for kind in "SK"
+               for n in range(100))
+    return out
+
+
+def judge_files(app, entry, ctx, d12, others=()):
+    """(fail, review) for what disappeared, changed or appeared during the removal. others: the table entries of
+    the neighbours left running, whose own files may change meanwhile (their logs...), never disappear."""
     fail, review = [], []
     allowed, keep = scope(app, entry, ctx), kept(entry, ctx)
-    owned = d12.get("owned", {})
+    running = [p for name, e in others for p in scope(name, e, ctx) + kept(e, ctx)]
+    owned = merged(d12.get("owned", {}))
     bad, near = [], []
-    for path in d12["removed"]:
+    for path, entry_ in d12["removed"].items():
         if under(path, allowed) or path in owned:
             continue
-        (near if under(path, keep) or TRANSIENT.search(path) else bad).append(path)
+        # FIFOs and sockets are a running program's (the .NET runtime's diagnostic pipes...): they go when it stops
+        runtime = entry_[0] in ("p", "s") or TRANSIENT.search(path)
+        (near if under(path, keep) or runtime else bad).append(path)
     if bad:
         fail.append("removed outside its scope: %s" % tops(bad))
     if near:
         review.append("removed in a folder it keeps, or a runtime file: %s" % sorted(near)[:20])
     home, other = [], []
     for path in d12["changed"]:
-        if under(path, allowed) or under(path, keep):
+        if under(path, allowed) or under(path, keep) or under(path, running):
             continue
         (home if path.startswith("/home/") else other).append(path)
     if home:
@@ -88,7 +105,7 @@ def judge_files(app, entry, ctx, d12):
     other = [p for p in other if p.rstrip("-") not in PASSWORD_FILES]
     if other:
         review.append("changed outside its scope: %s" % sorted(other)[:20])
-    added = [p for p in d12["added"] if not under(p, keep) and not under(p, allowed)]
+    added = [p for p in d12["added"] if not under(p, keep) and not under(p, allowed) and not under(p, running)]
     if added:
         review.append("appeared during the removal: %s" % tops(added))
     return fail, review
@@ -144,7 +161,8 @@ def judge_leftovers(app, entry, ctx, d02, created=()):
     """What the installation added that is still there after the removal (beyond what it keeps on purpose and the
     campaign's own witness folders)."""
     keep = kept(entry, ctx)
-    paths = [p for p in d02["added"] if MARK not in p and not under(p, keep) and p not in created]
+    packaged = d02.get("owned_added", {})  # files of the packages it left: counted with the packages
+    paths = [p for p in d02["added"] if MARK not in p and not under(p, keep) and p not in created and p not in packaged]
     review = []
     if paths:
         review.append("left by the installation: %s" % tops(paths))
@@ -196,7 +214,7 @@ def judge_archive(entry, ctx, before_paths, report, removal, traps):
     return fail, review
 
 
-def verdict(app, entry, r, reinstall=True):
+def verdict(app, entry, r, reinstall=True, others=()):
     """{'verdict': 'pass' or 'fail', 'fail': [...], 'review': [...]} for one record of remove.py's cycle."""
     fail, review = [], []
     if r.get("install", {}).get("result") != "installed":
@@ -218,7 +236,7 @@ def verdict(app, entry, r, reinstall=True):
     preview = removal.get("preview") or {}
     if sorted(preview.get("users") or []) != sorted(ctx["users"]):
         review.append("the confirmation lists the users %s, the machine has %s" % (preview.get("users"), ctx["users"]))
-    for f, rv in (judge_files(app, entry, ctx, r["d12"]), judge_packages(entry, r["d12"]),
+    for f, rv in (judge_files(app, entry, ctx, r["d12"], others), judge_packages(entry, r["d12"]),
                   judge_system(app, entry, r["d12"], r["d02"]),
                   judge_archive(entry, ctx, r.get("table_paths", {}), r.get("archive_report"), removal, r.get("traps"))):
         fail += f
@@ -319,8 +337,9 @@ def judge_failure(app, entry, r, expect, text):
         check = [c for c in removal.get("checks") or [] if c.get("id") == "nginx"]
         if not check or not check[0].get("ok") or "broken before" not in check[0].get("detail", ""):
             fail.append("the nginx check does not say it was broken before: %s" % check)
-        if r.get("after_fix") not in ("0", ""):
-            fail.append("once nginx was fixed, its location was still served (%s)" % r.get("after_fix"))
+        count = (r.get("after_fix") or "").strip().splitlines()[-1:]  # after nginx -t's own messages
+        if count not in ([], ["0"]):
+            fail.append("once nginx was fixed, its location was still served (%s)" % count)
     return {"verdict": "fail" if fail else "pass", "fail": fail, "review": review}
 
 
@@ -342,7 +361,7 @@ def verdict_for(spec, entry, r):
     """The verdict on one run of remove.py, whatever its kind."""
     app = spec["app"]
     expect = spec.get("expect")
-    v = verdict(app, entry, r, spec.get("reinstall", False)) if expect is None else \
+    v = verdict(app, entry, r, spec.get("reinstall", False), spec.get("others", ())) if expect is None else \
         judge_failure(app, entry, r, expect, spec.get("text", ""))
     if spec.get("via_panel"):
         v["fail"] += judge_panel((r.get("removal") or {}).get("panel") or {})

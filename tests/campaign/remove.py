@@ -212,6 +212,11 @@ class Campaign:
                 " chown -R swizzin:swizzin /opt/swizzin && bash store-helper/install.sh && systemctl restart panel",
                 timeout=300, check=True)
         self.wait_helper(name)
+        # Ubuntu's automatic updates start on their own in a fresh container and make a removal refuse, as they
+        # should (panne-apt-daily checks it on purpose): the other runs wait for them to end
+        self.sh(name, "systemctl stop apt-daily.timer apt-daily-upgrade.timer; for i in $(seq 1 180); do"
+                " systemctl is-active -q apt-daily.service apt-daily-upgrade.service"
+                " || break; sleep 5; done", timeout=960)
         catalogue = self.tool(name, "/root/campaign/client.py", "--catalogue")
         if "remove" not in catalogue.get("features", []):
             raise RuntimeError("the helper in the container cannot uninstall: %s" % catalogue.get("features"))
@@ -521,7 +526,7 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
                                  "fail": [record["error"]], "review": []}
             return record
         try:
-            record["verdict"] = analyse.verdict_for(dict(spec, affected=AFFECTS.get(app, [])), entry, dict(record, **detail))
+            record["verdict"] = analyse.verdict_for(self.judged(spec), entry, dict(record, **detail))
         except Exception as e:  # a bug of the analysis: the run stays, to be judged again
             record["verdict"] = {"verdict": "error", "fail": ["analysis: %s: %s" % (type(e).__name__, e)], "review": []}
         return record
@@ -566,6 +571,11 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
             self.save(self.run(spec))
         self.report()
 
+    def judged(self, spec):
+        """The spec as analyse.py wants it: what the confirmation names as affected, and the neighbours' entries."""
+        others = [(a, plain_entry(self.table["apps"][a])) for a in spec.get("watch", ()) if a in self.table["apps"]]
+        return dict(spec, affected=AFFECTS.get(spec["app"], []), others=others)
+
     def rejudge(self):
         """The verdicts again, with today's analyse.py, from what each run kept (no container)."""
         specs = {s["key"]: s for s in self.specs()}
@@ -580,8 +590,7 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
                     with gzip.open(path, "rt") as f:
                         detail[k] = json.load(f)
             entry = plain_entry(self.table["apps"][record["app"]])
-            record["verdict"] = analyse.verdict_for(dict(spec, affected=AFFECTS.get(record["app"], [])), entry,
-                                                    dict(record, **detail))
+            record["verdict"] = analyse.verdict_for(self.judged(spec), entry, dict(record, **detail))
         with open(self.results_path, "w") as f:
             for record in self.results.values():
                 f.write(json.dumps(record) + "\n")

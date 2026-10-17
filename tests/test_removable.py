@@ -31,6 +31,37 @@ CATEGORIES = {
     "misses": "a wrong path: deletes nothing (the runner deletes the right unit file itself)",
 }
 
+# Every other way a remove script deletes something (packages, users, Swizzin's db, npm...), and why it is
+# acceptable. The campaign found the first one missing from the table (Flood's npm package): never again unseen.
+OTHER_CATEGORIES = {
+    "package": "the app's own packages: listed in packages, the simulation and allowed limit what goes with them",
+    "user": "the app's own system user (its home is the app's folder, in gone or copy)",
+    "db": "the app's entries in Swizzin's db (/var/lib/swizzin/db), copied when they hold settings",
+    "program": "the app's program, installed by its installer: its folders are in gone",
+    "apt-source": "the app's own apt source, added by its installer: in gone",
+}
+OTHER_AUDIT = {
+    "airsonic": {"deluser airsonic --system --quiet": "user"},
+    "calibreweb": {"swizdb clear calibre/library_path": "db", "swizdb clear calibre/library_user": "db",
+                   'userdel calibreweb -f -r >> "$log" 2>&1': "user"},
+    "emby": {"dpkg -r emby-server > /dev/null 2>&1": "package"},
+    "flood": {'npm -g remove flood >> "$log" 2>&1': "program"},
+    "lidarr": {'swizdb clear "lidarr/owner"': "db"},
+    "mylar": {"swizdb clear mylar/owner": "db"},
+    "plex": {"apt_remove --purge plexmediaserver": "package", "dpkg -r plexmediaserver > /dev/null 2>&1": "package",
+             "userdel plex > /dev/null 2>&1": "user"},
+    "prowlarr": {'swizdb clear "$app_name/owner"': "db"},
+    "qbittorrent": {"apt_remove --purge ^libtorrent-rasterbar*": "package",
+                    "dpkg -r ${swizz_dep} > /dev/null 2>&1": "package",
+                    "dpkg -r libtorrent-rasterbar > /dev/null 2>&1": "package",
+                    "dpkg -r python-libtorrent > /dev/null 2>&1": "package",
+                    "dpkg -r python3-libtorrent > /dev/null 2>&1": "package",
+                    "dpkg -r qbittorrent-nox > /dev/null 2>&1": "package"},
+    "syncthing": {"apt_remove --purge syncthing": "package"},
+    "transmission": {"add-apt-repository --remove ppa:transmissionbt/ppa -y >> $log 2>&1": "apt-source",
+                     "apt_remove --purge transmission-common transmission-cli transmission-daemon": "package"},
+}
+
 # Every rm of every remove script, as written in it, and why it is acceptable. A changed script fails
 # the pins first; this list makes sure each deletion was looked at when an entry was added.
 AUDIT = {
@@ -212,6 +243,10 @@ AUDIT = {
 }
 
 RM = re.compile(r'(^|[;&|(\s])(sudo\s+)?(rm|rm_if_exists)\s')
+OTHER = re.compile(r'(^|[;&|(\s])(sudo\s+)?(npm\s.*\s(remove|uninstall|rm)\s|pip3?\s+uninstall|apt_remove|'
+                   r'apt-get\s.*(remove|purge)|apt\s+(remove|purge)|dpkg\s+(-r|-P|--purge|--remove)|userdel|deluser|'
+                   r'delgroup|groupdel|swizdb\s+clear|find\s.*-delete|unlink\s|rmdir\s|mv\s|'
+                   r'add-apt-repository\s.*--remove|truncate\s)')
 SOURCED = re.compile(r'^\s*(?:\.|source)\s+/etc/swizzin/(\S+)')
 # Never deleted by the App Store, nor any folder above them.
 PROTECTED = ("/", "/home", "/home/{user}", "/home/{master}", "/home/{owner}", "/home/{user}/.config",
@@ -282,6 +317,15 @@ class AgainstSwizzin(unittest.TestCase):
                 self.assertIn(category, CATEGORIES, (app, line))
             if "partial" in AUDIT[app].values():
                 self.assertTrue(removable.APPS[app].partial, app)
+
+    def test_every_other_deletion_was_reviewed(self):
+        for app in removable.APPS:
+            found = sorted(set(line for line in code_lines(removable.script(app)) if OTHER.search(line)))
+            self.assertEqual(found, sorted(OTHER_AUDIT.get(app, {})), app)
+            for line, category in OTHER_AUDIT.get(app, {}).items():
+                self.assertIn(category, OTHER_CATEGORIES, (app, line))
+                if category == "package":
+                    self.assertTrue(removable.APPS[app].packages, (app, line))
 
     def test_removable_apps_can_be_installed(self):
         for app in removable.APPS:

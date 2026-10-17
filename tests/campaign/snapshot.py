@@ -146,6 +146,10 @@ def diff(before, after):
     for name in gone_packages:
         for p in before["package_files"].get(name, []):
             owned[p] = name
+    owned_added = {}  # path -> package, for the packages that came (their files are listed with the package)
+    for name in new_packages:
+        for p in after["package_files"].get(name, []):
+            owned_added[p] = name
     return {
         "removed": {p: v for p, v in fa.items() if p not in fb},
         "added": {p: v for p, v in fb.items() if p not in fa},
@@ -154,7 +158,7 @@ def diff(before, after):
         "packages_added": new_packages,
         "packages_changed": {n: [v, after["packages"][n]] for n, v in before["packages"].items()
                              if n in after["packages"] and v[0] != after["packages"][n][0]},
-        "owned": owned,
+        "owned": owned, "owned_added": owned_added,
         "manual": [sorted(set(before["manual"]) - set(after["manual"])), sorted(set(after["manual"]) - set(before["manual"]))],
         "holds": [before["holds"], after["holds"]],
         "units_before": before["units"], "units_after": after["units"],

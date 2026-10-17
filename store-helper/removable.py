@@ -124,11 +124,13 @@ APPS = {
         gone=(_home("master", ".config/Filebrowser"), _home("master", "bin/filebrowser"),
               "/etc/systemd/system/filebrowser.service"),
         nginx=("/etc/nginx/apps/filebrowser.conf",)),
+    # Its program is npm's global package, removed by the script with `npm -g remove`.
     "flood": App(
         units=("flood@",),
         copy=(_home("user", ".config/flood"), _home("user", ".flood"), "/etc/nginx/conf.d/{user}.flood.conf"),
         skip=("temp",),
-        gone=(_home("user", ".config/flood"), _home("user", ".flood"), "/etc/systemd/system/flood@.service"),
+        gone=(_home("user", ".config/flood"), _home("user", ".flood"), "/etc/systemd/system/flood@.service",
+              "/usr/lib/node_modules/flood", "/usr/bin/flood"),
         nginx=("/etc/nginx/apps/flood.conf", "/etc/nginx/conf.d/*.flood.conf")),
     # The script deletes the program and its settings before stopping it (Restart=always): the runner stops it first.
     "jackett": App(
@@ -198,14 +200,18 @@ APPS = {
         nginx=("/etc/nginx/apps/prowlarr.conf",),
         answers=(("Would you like to purge the configuration?", "y"),)),
     # The script misses the settings folder (wrong case): qBittorrent.conf is copied because a reinstall
-    # rewrites it. Its libtorrent purge would take Deluge with it when Deluge is installed.
+    # rewrites it. Its libtorrent purge would take Deluge with it when Deluge is installed. It also forgets
+    # qbtindex.conf, the web index of the downloads (/qbittorrent.downloads): deleted after it.
     "qbittorrent": App(
         sources=("sources/functions/utils", "sources/functions/libtorrent"),
         units=("qbittorrent@",),
         copy=(_home("user", ".config/qBittorrent/qBittorrent.conf"), "/etc/nginx/conf.d/{user}.qbittorrent.conf"),
         gone=("/etc/systemd/system/qbittorrent@.service",),
-        kept=(_home("user", ".config/qBittorrent"), _home("user", "torrents/qbittorrent")),
-        nginx=("/etc/nginx/apps/qbittorrent.conf", "/etc/nginx/conf.d/*.qbittorrent.conf"),
+        kept=(_home("user", ".config/qBittorrent"), _home("user", ".local/share/qBittorrent"),
+              _home("user", "torrents/qbittorrent")),
+        nginx=("/etc/nginx/apps/qbittorrent.conf", "/etc/nginx/conf.d/*.qbittorrent.conf",
+               "/etc/nginx/apps/qbtindex.conf"),
+        leftovers=("/etc/nginx/apps/qbtindex.conf",),
         packages=("qbittorrent-nox", "libtorrent-rasterbar*", "python-libtorrent", "python3-libtorrent",
                   "qtbase5-swizzin", "qttools5-swizzin", "qt6-swizzin", "cmake-swizzin"),
         allowed=(r"qbittorrent-nox", r"libtorrent-rasterbar.*", r"python3?-libtorrent",
@@ -236,7 +242,8 @@ APPS = {
     "syncthing": App(
         units=("syncthing@",),
         gone=("/etc/systemd/system/syncthing@.service",),
-        kept=(_home("master", ".config/syncthing"), _home("master", ".local/state/syncthing")),
+        kept=(_home("master", ".config/syncthing"), _home("master", ".local/state/syncthing"),
+              _home("master", "Sync")),
         nginx=("/etc/nginx/apps/syncthing.conf",),
         packages=("syncthing",),
         allowed=(r"syncthing",)),
@@ -245,13 +252,18 @@ APPS = {
         copy=("/opt/tautulli/config.ini", "/opt/tautulli/tautulli.db*"),
         gone=("/opt/tautulli", "/opt/.venv/tautulli", "/etc/systemd/system/tautulli.service"),
         nginx=("/etc/nginx/apps/tautulli.conf",)),
-    # Only settings.json is deleted (torrents, resume data and downloads stay); a reinstall rewrites it.
+    # Only settings.json is deleted (torrents, resume data and downloads stay); a reinstall rewrites it. The script
+    # removes the PPA its installer added (Ubuntu), and forgets tmsindex.conf, the web index of the downloads
+    # (/transmission.downloads): deleted after it.
     "transmission": App(
         units=("transmission@",),
         copy=(_home("user", ".config/transmission-daemon/settings.json"), "/etc/nginx/conf.d/{user}.transmission.conf"),
-        gone=(_home("user", ".config/transmission-daemon/settings.json"), "/etc/systemd/system/transmission@.service"),
-        kept=(_home("user", ".config/transmission-daemon"),),
-        nginx=("/etc/nginx/apps/transmission.conf", "/etc/nginx/conf.d/*.transmission.conf"),
+        gone=(_home("user", ".config/transmission-daemon/settings.json"), "/etc/systemd/system/transmission@.service",
+              "/etc/apt/sources.list.d/transmissionbt-ubuntu-ppa-*"),
+        kept=(_home("user", ".config/transmission-daemon"), _home("user", "transmission")),
+        nginx=("/etc/nginx/apps/transmission.conf", "/etc/nginx/conf.d/*.transmission.conf",
+               "/etc/nginx/apps/tmsindex.conf"),
+        leftovers=("/etc/nginx/apps/tmsindex.conf",),
         packages=("transmission-common", "transmission-cli", "transmission-daemon"),
         allowed=(r"transmission-(common|cli|daemon)",)),
 }
