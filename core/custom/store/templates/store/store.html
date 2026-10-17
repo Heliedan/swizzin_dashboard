@@ -18,7 +18,7 @@
   {{ macros.build_nav(user=user, apps=pages) }}
   <div class="container-fluid store" data-urlbase="{{ config.URLBASE }}" data-ready="{{ 'no' if error else 'yes' }}" data-job='{{ job|tojson }}' data-ask-password="{{ 'yes' if ask_password else 'no' }}">
     <h4 class="mb-1">App Store</h4>
-    <p class="text-muted store-intro">The applications Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal. System components and tools set up on the machine itself (nginx, Let's Encrypt, WireGuard, rclone…) are not offered here: install them over SSH.</p>
+    <p class="text-muted store-intro">The applications Swizzin can install. Installing one runs <code>box install &lt;name&gt;</code> on the server, as root, exactly like over SSH: it can take a few minutes, and some installers ask questions in the terminal. System components and tools set up on the machine itself (nginx, Let's Encrypt, WireGuard, rclone…) are not offered here: install them over SSH. Some installed apps can also be uninstalled from here: a copy of their settings is saved first.</p>
 
     {% if error %}
     <div class="alert alert-warning" role="alert">
@@ -31,9 +31,15 @@
     </div>
     {% else %}
     <div id="store-banner" class="alert alert-info d-flex flex-wrap align-items-center" role="status" hidden>
-      <span class="mr-3">Installation of <strong id="store-banner-app"></strong> in progress.</span>
+      <span class="mr-3"><span id="store-banner-action">Installation</span> of <strong id="store-banner-app"></strong> in progress.</span>
       <button type="button" class="btn btn-sm btn-light" id="store-banner-show">Show the terminal</button>
     </div>
+    {% if last and last.action == "remove" and last.result == "incomplete" %}
+    <div id="store-incomplete" class="alert alert-warning d-flex flex-wrap align-items-center" role="status">
+      <span class="mr-3">The uninstallation of <strong>{{ last.app }}</strong> stopped halfway{% if last.message %} ({{ last.message }}){% endif %}.</span>
+      <button type="button" class="btn btn-sm btn-light store-remove" data-app="{{ last.app }}" data-pretty="{{ last.app }}">Try again</button>
+    </div>
+    {% endif %}
     <div class="store-toolbar d-flex flex-wrap align-items-center">
       <input type="search" id="store-search" class="form-control mr-2 mb-2" placeholder="Search" aria-label="Search applications" autocomplete="off">
       <div class="btn-group mb-2" role="group" aria-label="Show">
@@ -47,7 +53,7 @@
       <h5 class="store-heading">Applications <span class="badge badge-secondary store-count">{{ apps|length }}</span></h5>
       <div class="row">
         {% for e in apps %}
-        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}" data-available="{{ 'no' if e.unavailable and not e.installed else 'yes' }}"{% if e.path %} data-path="{{ e.path }}"{% endif %}{% if e.scheme %} data-scheme="{{ e.scheme }}"{% endif %}{% if e.unreliable_check %} data-check="unreliable"{% endif %}{% if e.note %} data-note="{{ e.note }}"{% endif %}>
+        <div class="col-12 col-sm-6 col-lg-4 col-xl-3 mb-3 store-item" data-app="{{ e.name }}" data-text="{{ (e.pretty ~ ' ' ~ e.name ~ ' ' ~ e.description)|lower }}" data-installed="{{ 'yes' if e.installed else 'no' }}" data-available="{{ 'no' if e.unavailable and not e.installed else 'yes' }}"{% if e.path %} data-path="{{ e.path }}"{% endif %}{% if e.scheme %} data-scheme="{{ e.scheme }}"{% endif %}{% if e.unreliable_check %} data-check="unreliable"{% endif %}{% if e.note %} data-note="{{ e.note }}"{% endif %}{% if e.remove == "ok" %} data-removed="{{ e.removed }}" data-kept="{{ e.kept }}" data-affects="{{ e.affects|join(", ") }}"{% endif %}>
           <div class="card h-100 store-card{{ ' installed' if e.installed }}{{ ' unavailable' if e.unavailable and not e.installed }}">
             <div class="card-body">
               <div class="d-flex align-items-center mb-2">
@@ -62,6 +68,11 @@
             <div class="card-footer store-foot">
               {% if e.installed %}
               <span class="badge badge-success">Installed</span>
+              {% if e.remove == "ok" %}
+              <button type="button" class="btn btn-sm btn-outline-danger ml-2 store-remove" data-app="{{ e.name }}" data-pretty="{{ e.pretty }}">Uninstall</button>
+              {% elif e.remove_reason %}
+              <small class="text-muted d-block mt-1 store-remove-reason">{{ e.remove_reason }}</small>
+              {% endif %}
               {% elif e.unavailable %}
               <span class="badge badge-secondary">Not available for now</span>
               <small class="text-muted d-block mt-1 store-reason">{{ e.unavailable }}</small>
@@ -109,6 +120,38 @@
       </div>
     </div>
 
+    <div class="modal fade" id="store-remove-modal" tabindex="-1" role="dialog" aria-labelledby="store-remove-title" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <form class="modal-content" id="store-remove-form" autocomplete="off">
+          <div class="modal-header">
+            <h5 class="modal-title" id="store-remove-title">Uninstall <span id="store-remove-app"></span>?</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Cancel"><span aria-hidden="true">&times;</span></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted" id="store-remove-loading">Checking what uninstalling it involves…</p>
+            <div id="store-remove-details" hidden>
+              <p class="mb-2"><strong>Removed:</strong> <span id="store-remove-removed"></span></p>
+              <p class="mb-2"><strong>Kept:</strong> your downloads and media are not touched. <span id="store-remove-kept"></span></p>
+              <p class="mb-2" id="store-remove-users-line"><strong>For every user of this server:</strong> <span id="store-remove-users"></span>.</p>
+              <p class="mb-2" id="store-remove-copy-line"><strong>Safety copy:</strong> its settings are saved first, about <span id="store-remove-size"></span>, in <code id="store-remove-archives"></code> (readable by root only; how to put them back is in its RESTORE.txt).<span id="store-remove-partial"> Large data the app rebuilds by itself (posters, metadata) is not copied.</span></p>
+              <p class="mb-2" id="store-remove-nocopy-line"><strong>Safety copy:</strong> none needed, uninstalling it deletes none of your settings.</p>
+              <p class="text-warning mb-2" id="store-remove-affects-line"><strong>May stop working:</strong> <span id="store-remove-affects"></span>, which may use it.</p>
+              <p class="text-warning mb-2" id="store-remove-retry-line">Its last uninstallation stopped halfway: this finishes it.</p>
+              <label for="store-remove-confirm" class="mt-2 mb-1">Type <strong id="store-remove-name"></strong> to confirm</label>
+              <input type="text" class="form-control" id="store-remove-confirm" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+              <label for="store-remove-password" class="mt-2 mb-1">Your panel password</label>
+              <input type="password" class="form-control" id="store-remove-password" autocomplete="current-password">
+            </div>
+            <small class="text-danger d-block mt-2" id="store-remove-error" role="alert"></small>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" id="store-remove-cancel">Cancel</button>
+            <button type="submit" class="btn btn-danger" id="store-remove-go" disabled>Uninstall</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="modal fade" id="store-terminal" tabindex="-1" role="dialog" aria-labelledby="store-terminal-title" aria-hidden="true" data-backdrop="static">
       <div class="modal-dialog modal-xl" role="document">
         <div class="modal-content">
@@ -117,8 +160,20 @@
             <span class="badge badge-info ml-3 align-self-center" id="store-terminal-status"></span>
           </div>
           <div class="modal-body p-0">
+            <ol class="store-steps list-inline mb-0" id="store-steps" hidden>
+              <li class="list-inline-item" data-step="check">Checking</li>
+              <li class="list-inline-item" data-step="stop">Stopping</li>
+              <li class="list-inline-item" data-step="copy">Saving a copy</li>
+              <li class="list-inline-item" data-step="remove">Removing</li>
+              <li class="list-inline-item" data-step="verify">Verifying</li>
+            </ol>
             <div id="store-term" class="store-term"></div>
             <p class="store-note text-muted mb-0" id="store-terminal-note"></p>
+            <div class="store-result" id="store-remove-result" hidden>
+              <ul class="list-unstyled mb-1" id="store-remove-checks"></ul>
+              <p class="mb-1" id="store-remove-message"></p>
+              <p class="mb-0" id="store-remove-archive-line">Copy of its settings: <code id="store-remove-archive"></code></p>
+            </div>
           </div>
           <div class="modal-footer justify-content-between">
             <div class="d-flex flex-wrap align-items-center">
@@ -132,6 +187,8 @@
                 <button type="button" class="btn btn-outline-light" data-key="esc">Esc</button>
               </div>
               <button type="button" class="btn btn-sm btn-outline-warning mr-2 mb-1" id="store-ctrl-c" title="Interrupts the installation, like Ctrl+C over SSH">Ctrl+C</button>
+              <button type="button" class="btn btn-sm btn-outline-warning mr-2 mb-1" id="store-stop" title="Possible until Swizzin's remove script starts: everything is put back as it was" hidden>Stop</button>
+              <button type="button" class="btn btn-sm btn-warning mr-2 mb-1 store-remove" id="store-retry" hidden>Try again</button>
               <button type="button" class="btn btn-sm btn-outline-light mr-2" id="store-take">Take control</button>
               {% if ask_password %}
               <form class="form-inline" id="store-take-form" autocomplete="off" hidden>

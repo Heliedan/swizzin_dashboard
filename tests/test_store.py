@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -134,8 +135,11 @@ class StorePage(unittest.TestCase):
         finally:
             del swizzin.app.config["STORE_ASK_PASSWORD"]
         self.assertIn('data-ask-password="no"', html)
-        self.assertNotIn('type="password"', html)
+        self.assertNotIn('id="store-confirm-password"', html)
+        self.assertNotIn('id="store-take-password"', html)
         self.assertIn('id="store-take"', html)
+        self.assertEqual(html.count('type="password"'), 1)  # uninstalling asks for it whatever the setting
+        self.assertIn('id="store-remove-password"', html)
 
     def test_other_users_are_refused(self):
         r, _ = self.page("other")
@@ -181,6 +185,35 @@ class StorePage(unittest.TestCase):
         store.register(app, None, swizzin.htpasswd)
         self.assertNotIn("store", app.blueprints)
 
+
+    def test_uninstall_reason_and_no_framing(self):
+        r, html = self.page()
+        self.assertEqual(r.headers["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", r.headers["Content-Security-Policy"])
+        jellyfin = self.item(html, "jellyfin")  # installed, and not uninstalled from the App Store
+        self.assertIn("Uninstall it over SSH only: Swizzin&#39;s removal can stop halfway", jellyfin)
+        self.assertNotIn('store-remove"', jellyfin)
+
+    def test_uninstall_button_with_its_texts(self):
+        catalogue = {"ok": True, "features": ["install", "remove"], "job": None, "last": None, "apps": [
+            {"name": "bazarr", "description": "subtitles", "installed": True, "blocked": False, "remove": "ok"},
+            {"name": "radarr", "description": "films", "installed": True, "blocked": False, "remove": "ok"}]}
+        with mock.patch.object(store, "helper_call", return_value=catalogue):
+            html = self.page()[1]
+        bazarr = self.item(html, "bazarr")
+        self.assertIn('class="btn btn-sm btn-outline-danger ml-2 store-remove" data-app="bazarr"', bazarr)
+        self.assertIn('data-removed="Bazarr and its settings: providers, languages, subtitle history."', bazarr)
+        self.assertIn('data-kept="The subtitles it already downloaded, next to your media."', bazarr)
+        self.assertIn('data-affects=""', bazarr)
+        self.assertIn('data-affects="Bazarr"', self.item(html, "radarr"))  # installed, and may use Radarr
+
+    def test_an_incomplete_removal_is_shown_when_the_page_opens(self):
+        catalogue = {"ok": True, "features": ["install", "remove"], "job": None, "apps": [],
+                     "last": {"app": "bazarr", "action": "remove", "result": "incomplete", "message": "<b>x</b>"}}
+        with mock.patch.object(store, "helper_call", return_value=catalogue):
+            html = self.page()[1]
+        self.assertIn('id="store-incomplete"', html)
+        self.assertIn("The uninstallation of <strong>bazarr</strong> stopped halfway (&lt;b&gt;x&lt;/b&gt;)", html)
 
 class UninstallTexts(unittest.TestCase):
     """What the page says about uninstalling, from what the helper reports (entries() alone)."""
