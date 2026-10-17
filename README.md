@@ -32,7 +32,7 @@ In the live Disk Info card, **each disk has its own light box** with its read/wr
 
 *Screenshots from a throwaway test server: the App Store page, the qBittorrent installer's version menu in the page's terminal, and the end of an installation (autobrr).*
 
-The panel runs as the `swizzin` user, which cannot even read the list of Swizzin applications (`/etc/swizzin` belongs to root). A small root service, **swizzin-store** (`store-helper/`, Python standard library only), lists the applications and runs the installations; the panel relays them to the page. Without the service, the page only explains how to install it:
+The panel runs as the `swizzin` user, which cannot even read the list of Swizzin applications (`/etc/swizzin` belongs to root). A small root service, **swizzin-store** (`store-helper/`, Python standard library only), lists the applications and runs the installations; the panel relays them to the page. `heliedan.sh install` sets it up (see [Trying it](#trying-it)). Without the service, the page only explains how to install it by hand:
 
 ```bash
 # as root, from a copy of this branch that the panel user cannot write
@@ -67,7 +67,17 @@ The proposals stay open upstream. When the official project publishes changes, I
 
 ### Trying it
 
-Swizzin installs the panel from the official repository, so switching is manual and meant for people comfortable with git: back up `/opt/swizzin`, fetch this branch there, then restart the panel (`systemctl restart panel`). Your custom tiles (`core/custom/profiles.py`) are not touched. The App Store also needs its service (see [App Store](#app-store)). `box upgrade panel` brings the official version back; the App Store service then stays installed but unused until you remove it (`install.sh --uninstall`).
+Swizzin installs the panel from the official repository. [`heliedan.sh`](heliedan.sh) switches it to this edition and back, after a full backup of `/opt/swizzin`. Read it first, then run it as root on your Swizzin server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Heliedan/swizzin_dashboard/heliedan/heliedan.sh -o heliedan.sh
+less heliedan.sh                  # read it
+sudo bash heliedan.sh install     # back up /opt/swizzin, switch to this edition, install the App Store service
+sudo bash heliedan.sh status
+sudo bash heliedan.sh revert      # put the official panel back exactly as it was
+```
+
+It changes nothing else (no nginx, sudo or Swizzin setting). Your custom tiles (`core/custom/profiles.py`) and `swizzin.cfg` are kept, and if a step fails, the panel is put back as it was. Run `install` again to update. `box upgrade panel` also brings the official code back, but leaves the App Store service and a few unused files: `heliedan.sh revert` removes them.
 
 ### Transparency
 
