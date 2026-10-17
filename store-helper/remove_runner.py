@@ -65,19 +65,8 @@ def options(argv=None):
     p.add_argument("--work", default="/root", help="where the private copy of the script is written")
     p.add_argument("--timeout", type=int, default=2700, help="seconds the remove script may run")
     p.add_argument("--quiet-timeout", type=int, default=900, help="seconds the remove script may print nothing")
+    p.add_argument("--retry", action="store_true", help="try again after an incomplete removal (the lock may be gone)")
     return p.parse_args(argv)
-
-
-def load_table(path):
-    if not path:
-        return removable.COMMON, removable.PINS, removable.APPS
-    with open(path) as f:
-        data = json.load(f)
-
-    def frozen(value):
-        return tuple(frozen(v) for v in value) if isinstance(value, list) else value
-    apps = {name: removable.App(**{k: frozen(v) for k, v in fields.items()}) for name, fields in data["apps"].items()}
-    return tuple(data["common"]), {k: tuple(v) for k, v in data["pins"].items()}, apps
 
 
 def say(text):
@@ -109,7 +98,7 @@ class Removal:
     def __init__(self, opts):
         self.opts = opts
         self.app = opts.app
-        self.common, self.pins, self.apps = load_table(opts.table)
+        self.common, self.pins, self.apps = removable.load(opts.table)
         self.entry = self.apps.get(self.app)
         self.instances = {}  # unit -> {"active": bool, "enabled": bool}
         self.archive = None
@@ -361,28 +350,10 @@ class Removal:
         return any(fnmatch.fnmatchcase(name, pattern) for pattern in self.entry.skip)
 
     def nginx_installed(self):
-        return os.path.exists(os.path.join(self.real(self.opts.locks), ".nginx.lock"))
+        return os.path.exists(os.path.join(self.opts.locks, ".nginx.lock"))
 
-    def phase_check(self):
-        self.step("check", "1/5 Checking that the removal is safe...")
-        if self.entry is None:
-            raise Refused("the App Store cannot uninstall %s" % self.app)
-        if not os.path.exists(os.path.join(self.real(self.opts.locks), "." + self.app + ".lock")):
-            raise Refused("%s is not installed" % self.app)
-        for other in self.entry.refuse_if:
-            if os.path.exists(os.path.join(self.real(self.opts.locks), "." + other + ".lock")):
-                raise Refused("%s is installed: removing %s this way would harm it" % (other, self.app))
-        self.contents = self.check_pins()
-        busy = self.apt_busy()
-        if busy:
-            raise Refused(busy + ": try again in a few minutes")
-        if command("apt-get", "check")[0] != 0:
-            raise Refused("apt reports a problem (apt-get check): fix it over SSH first")
-        audit = command("dpkg", "--audit")
-        if audit[0] != 0 or audit[1].strip():
-            raise Refused("dpkg reports half-installed packages (dpkg --audit): fix it over SSH first")
-        self.packages_before = self.installed_packages()
-        self.check_packages()
+    def resolve(self):
+        """Users, owner, unit instances and the paths of the table, as they are on this system now."""
         self.master = self._first_field(self.real("/root/.master.info"))
         self.instances = {u: self.unit_state(u) for u in self.find_instances()}
         self.owner = ""
@@ -395,6 +366,36 @@ class Removal:
         self.gone_paths = self.expand(self.entry.gone)
         self.kept_paths = [p for p in self.expand(self.entry.kept) if os.path.lexists(self.real(p))]
         self.nginx_paths = self.expand(self.entry.nginx)
+
+    def describe(self):
+        """For the confirmation, before anything is done: who is concerned and how big the copy will be."""
+        if self.entry is None:
+            raise Refused("the App Store cannot uninstall %s" % self.app)
+        self.resolve()
+        return {"users": self.user_list, "services": sorted(self.instances), "partial": self.entry.partial,
+                "estimate": self.estimate(self.copy_paths), "archives": self.opts.archives}
+
+    def phase_check(self):
+        self.step("check", "1/5 Checking that the removal is safe...")
+        if self.entry is None:
+            raise Refused("the App Store cannot uninstall %s" % self.app)
+        if not self.opts.retry and not os.path.exists(os.path.join(self.opts.locks, "." + self.app + ".lock")):
+            raise Refused("%s is not installed" % self.app)
+        for other in self.entry.refuse_if:
+            if os.path.exists(os.path.join(self.opts.locks, "." + other + ".lock")):
+                raise Refused("%s is installed: removing %s this way would harm it" % (other, self.app))
+        self.contents = self.check_pins()
+        busy = self.apt_busy()
+        if busy:
+            raise Refused(busy + ": try again in a few minutes")
+        if command("apt-get", "check")[0] != 0:
+            raise Refused("apt reports a problem (apt-get check): fix it over SSH first")
+        audit = command("dpkg", "--audit")
+        if audit[0] != 0 or audit[1].strip():
+            raise Refused("dpkg reports half-installed packages (dpkg --audit): fix it over SSH first")
+        self.packages_before = self.installed_packages()
+        self.check_packages()
+        self.resolve()
         for path in self.copy_paths + self.gone_paths + self.kept_paths + self.nginx_paths + list(self.entry.leftovers):
             problem = self.safe_path(path)
             if problem:
@@ -756,7 +757,7 @@ class Removal:
     def phase_verify(self, timed_out):
         self.step("verify", "5/5 Checking the result...")
         self.check("script finished in time", not timed_out)
-        self.check("lock file removed", not os.path.exists(os.path.join(self.real(self.opts.locks), "." + self.app + ".lock")))
+        self.check("lock file removed", not os.path.exists(os.path.join(self.opts.locks, "." + self.app + ".lock")))
         loaded = [u for u in self.instances
                   if command("systemctl", "show", "-p", "LoadState", "--value", u)[1].strip() not in ("", "not-found")]
         self.check("services removed", not loaded, ", ".join(loaded))

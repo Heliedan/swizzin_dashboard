@@ -13,6 +13,7 @@ Paths may contain {user} (every user with a home: Swizzin's users, htpasswd user
 app's unit instances), {master} (Swizzin's master user) and {owner} (the User= of owner_unit, else the
 master). A name with * matches inside its folder only.
 """
+import json
 from dataclasses import dataclass
 
 AUDITED = "1bb1321"
@@ -275,3 +276,16 @@ def script(app):
 def pinned_files(app):
     """Every file of Swizzin the removal of app runs or loads."""
     return COMMON + APPS[app].sources + (script(app),)
+
+
+def load(path=None):
+    """(common files, pins, apps): this module's, or a JSON table of the same shape (the tests')."""
+    if not path:
+        return COMMON, PINS, APPS
+    with open(path) as f:
+        data = json.load(f)
+
+    def frozen(value):
+        return tuple(frozen(v) for v in value) if isinstance(value, list) else value
+    apps = {name: App(**{k: frozen(v) for k, v in fields.items()}) for name, fields in data["apps"].items()}
+    return tuple(data["common"]), {k: tuple(v) for k, v in data["pins"].items()}, apps

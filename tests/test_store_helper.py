@@ -34,7 +34,7 @@ def fake_swizzin(base):
 
 
 class Helper:
-    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False, max_file_size=None):
+    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False, max_file_size=None, env=None):
         self.path = os.path.join(base, "store.sock")
         uid = os.getuid() if allow_uid is None else allow_uid
         try:
@@ -44,7 +44,7 @@ class Helper:
         self.proc = subprocess.Popen(
             [sys.executable, "-I", "-B", HELPER, "--socket", self.path, "--scripts", os.path.join(base, "scripts"),
              "--lang", os.path.join(base, "lang_en"), "--locks", os.path.join(base, "locks"),
-             "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+             "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
             preexec_fn=lambda: self._limits(ignore_sigint, max_file_size))
         for _ in range(100):
             if os.path.exists(self.path):
@@ -64,9 +64,9 @@ class Helper:
         s.connect(self.path)
         return s
 
-    def stop(self):
+    def stop(self, timeout=5):
         self.proc.terminate()
-        return self.proc.communicate(timeout=5)[1].decode()
+        return self.proc.communicate(timeout=timeout)[1].decode()
 
 
 def ask(s, raw):

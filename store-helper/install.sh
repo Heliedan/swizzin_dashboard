@@ -11,8 +11,8 @@ NEEDRESTART=/etc/needrestart/conf.d/swizzin-store.conf
 
 [[ $EUID -eq 0 ]] || { echo "Run this as root (sudo)." >&2; exit 1; }
 
-# Restarting or removing the helper would cut off an installation in progress: go on only if the running
-# helper clearly says that none is running (any doubt refuses).
+# Restarting or removing the helper would cut off an installation or an uninstallation in progress: go on only
+# if the running helper clearly says that none is running (any doubt refuses).
 if systemctl is-active --quiet swizzin-store; then
     state=$(/usr/bin/python3 -I -c '
 import json, socket
@@ -24,7 +24,7 @@ while not data.endswith(b"\n"):
     data += chunk
 print("idle" if json.loads(data).get("job") is None else "busy")' 2>/dev/null || true)
     if [[ $state == busy ]]; then
-        echo "An installation is running in the App Store: wait for it to finish, then run this again." >&2
+        echo "An installation or an uninstallation is running in the App Store: wait for it to finish, then run this again." >&2
         exit 1
     elif [[ $state != idle ]]; then
         echo "Could not ask the App Store helper whether an installation is running. Try again in a minute," \
@@ -38,14 +38,15 @@ if [[ ${1:-} == --uninstall ]]; then
     rm -f "$UNIT" "$NEEDRESTART"
     rm -rf "$DEST"
     systemctl daemon-reload
-    echo "App Store helper removed (its logs stay in /var/log/swizzin-store)."
+    echo "App Store helper removed (its logs stay in /var/log/swizzin-store, the copies of settings in /var/backups/swizzin-store)."
     exit 0
 fi
 
 # Root will run these files: each one, and every folder from here up to /, must belong to root and be writable
 # by root only. Otherwise another user (the panel's, for one) could change them, or swap them in between.
 unsafe() { [[ $(stat -c %u "$1") != 0 ]] || (( 8#$(stat -c %a "$1") & 8#022 )); }
-for f in "$HERE/swizzin_store.py" "$HERE/swizzin-store.service" "$HERE/needrestart.conf"; do
+FILES=(swizzin_store.py removable.py remove_runner.py)
+for f in "${FILES[@]/#/$HERE/}" "$HERE/swizzin-store.service" "$HERE/needrestart.conf"; do
     if unsafe "$f"; then
         echo "Refusing to install $f: it must belong to root and be writable by root only." >&2
         exit 1
@@ -66,7 +67,9 @@ id swizzin >/dev/null 2>&1 || { echo "No 'swizzin' user: is the Swizzin panel in
 [[ -x /usr/local/bin/swizzin/box ]] || { echo "Swizzin's box command is missing (/usr/local/bin/swizzin/box)." >&2; exit 1; }
 
 install -d -o root -g root -m 0755 "$DEST"
-install -o root -g root -m 0644 "$HERE/swizzin_store.py" "$DEST/swizzin_store.py"
+for f in "${FILES[@]}"; do
+    install -o root -g root -m 0644 "$HERE/$f" "$DEST/$f"
+done
 install -o root -g root -m 0644 "$HERE/swizzin-store.service" "$UNIT"
 if [[ -d /etc/needrestart/conf.d ]]; then
     install -o root -g root -m 0644 "$HERE/needrestart.conf" "$NEEDRESTART"

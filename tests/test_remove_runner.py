@@ -132,7 +132,7 @@ class World:
 
     def argv(self, app, *extra):
         return [sys.executable, "-I", "-B", RUNNER, "--app", app, "--state", os.path.join(self.base, "state.json"),
-                "--result", os.path.join(self.base, "result.json"), "--swizzin", self.swizzin, "--locks", "/install",
+                "--result", os.path.join(self.base, "result.json"), "--swizzin", self.swizzin, "--locks", self.path("/install"),
                 "--archives", self.archives, "--root", self.root, "--table", os.path.join(self.base, "table.json"),
                 "--work", self.work, *extra]
 
@@ -385,6 +385,7 @@ class Pieces(unittest.TestCase):
         opts = remove_runner.options(["--app", "demo", "--state", os.path.join(self.w.base, "s.json"),
                                       "--result", os.path.join(self.w.base, "r.json"), "--swizzin", self.w.swizzin,
                                       "--archives", self.w.archives, "--root", self.w.root,
+                                      "--locks", self.w.path("/install"),
                                       "--table", os.path.join(self.w.base, "table.json")])
         self.r = remove_runner.Removal(opts)
 

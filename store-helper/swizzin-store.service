@@ -1,5 +1,5 @@
 [Unit]
-Description=Swizzin App Store helper (lists Swizzin apps for the panel)
+Description=Swizzin App Store helper (installs and uninstalls Swizzin apps for the panel)
 After=local-fs.target
 
 [Service]
@@ -13,7 +13,10 @@ LogsDirectoryMode=0700
 WorkingDirectory=/root
 UMask=0022
 Restart=on-failure
-TimeoutStopSec=30
+# Stopping it during an uninstallation: only this service gets SIGTERM; it waits for Swizzin's remove script to
+# end (it must not be cut off halfway), then everything left is killed. Installations stop at once, as before.
+KillMode=mixed
+TimeoutStopSec=600
 
 [Install]
 WantedBy=multi-user.target

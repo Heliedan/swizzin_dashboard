@@ -13,12 +13,19 @@ Operations:
   {"op": "install", "app", "rows", "cols"} -> {"ok", "started": job, "control_key"} or {"ok": false, "error"}
   {"op": "attach", "control_key"|"take"}   -> {"ok", "attached": job, "controller"}, then {"output"}, {"phase"}, {"done"}
   {"op": "input", "data"} / {"op": "resize", "rows", "cols"}   (from the connection that controls the job only)
+  {"op": "remove-preview", "app"}        -> {"ok", "preview": {users, services, partial, estimate, archives, retry},
+                                             "ticket"} (what the confirmation shows; the ticket is good for 5 minutes)
+  {"op": "remove", "app", "ticket", "confirm", "requester", "rows", "cols"} -> {"ok", "started": job, "control_key"}
 
 An installation runs `box install <app>` in a pseudo-terminal, exactly as over SSH (the
 installers ask their questions on /dev/tty and draw whiptail menus), then `box test <app>`
 when the app's lock file appeared, and once more a minute later if it failed (some apps take
 a while to open their port after their first start). One at a time. Whoever started it, or later took
 control (the panel asks for the admin password first), may type in it; others only watch.
+
+An uninstallation runs remove_runner.py in the same kind of terminal: only for the apps of removable.py, whose
+Swizzin files are the audited ones; it saves the app's settings first and never goes through `box remove`
+(see remove_runner.py). Once Swizzin's remove script runs, nothing cuts it off, not even this service stopping.
 
 Installed by store-helper/install.sh into /usr/local/lib/swizzin-store/ (root-owned),
 never run from /opt/swizzin, which the panel user can write. Standard library only.
@@ -27,6 +34,7 @@ import argparse
 import codecs
 import fcntl
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -38,11 +46,19 @@ import selectors
 import signal
 import socket
 import struct
+import subprocess
 import sys
 import termios
 import time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)  # -I leaves this folder out; install.sh checks that it belongs to root
+import removable  # noqa: E402
+import remove_runner  # noqa: E402
+
 NAME = re.compile(r"[a-z0-9]{1,32}")
+UNIT = re.compile(r"[A-Za-z0-9@._-]+\.service")
+RUNNER = os.path.join(HERE, "remove_runner.py")
 # Not offered by the App Store, refused here: system components and tools that are set up on the
 # machine itself (over SSH), some of which change how the server is reached or secured, and xmrig,
 # a cryptocurrency miner that mines for the Swizzin project when it is not given a wallet.
@@ -55,7 +71,10 @@ MAX_INPUT = 4096
 REPLAY = 512 * 1024
 MAX_LOG = 50 * 1024 * 1024
 KEEP_LOGS = 20
-FEATURES = ["install"]  # tells the panel which operations this version of the service offers
+FEATURES = ["install", "remove"]  # tells the panel which operations this version of the service offers
+TICKET_TTL = 300  # seconds a confirmation window may stay open before uninstalling
+REMOVE_STOP_WAIT = 540  # seconds this service waits for a removal when told to stop (its TimeoutStopSec is 600)
+REMOVE_PHASES = ("check", "stop", "copy", "remove", "fix", "verify")
 # The installers' whole environment: nothing comes from the client or from this service's own
 # environment (scripts read common names such as user, pass or log). PATH ends like root's over SSH
 # (Swizzin adds /usr/local/bin/swizzin in .bashrc). TERM is required: without
@@ -88,6 +107,16 @@ def options(argv=None):
     p.add_argument("--blocked", default=",".join(BLOCKED), help="comma-separated apps the store does not offer")
     p.add_argument("--retest-delay", type=int, default=60,
                    help="seconds before checking an app again when its first checks failed (0: no second check)")
+    p.add_argument("--swizzin", default="/etc/swizzin", help="Swizzin's folder (remove scripts and their environment)")
+    p.add_argument("--archives", default="/var/backups/swizzin-store", help="copies of the settings of removed apps")
+    p.add_argument("--work", default="/root", help="where the uninstaller writes its private copy of a remove script")
+    p.add_argument("--no-remove", default="/etc/swizzin-store.no-remove",
+                   help="uninstalling from the App Store is turned off while this file exists")
+    p.add_argument("--root", default="/", help="tests: the uninstaller takes every path under this folder")
+    p.add_argument("--table", help="tests: a JSON table of uninstallable apps instead of removable.py")
+    p.add_argument("--test-path", help="tests: folder put first in the uninstaller's PATH (fake system tools)")
+    p.add_argument("--test-env", action="append", default=[], help="tests: NAME=VALUE for the uninstaller")
+    p.add_argument("--runner-option", action="append", default=[], help="tests: an option for remove_runner.py")
     return p.parse_args(argv)
 
 
@@ -118,8 +147,30 @@ def catalogue(opts):
     locks = {f[1:-5] for f in os.listdir(opts.locks) if f.startswith(".") and f.endswith(".lock")}
     text = descriptions(opts.lang)
     blocked = set(opts.blocked.split(","))
-    return [{"name": n, "description": text.get(n.upper(), ""), "installed": n in locks,
-             "blocked": n in blocked} for n in app_names(opts)]
+    table = removable.load(opts.table)
+    return [{"name": n, "description": text.get(n.upper(), ""), "installed": n in locks, "blocked": n in blocked,
+             "remove": removal_status(opts, table, n) if n in locks else None} for n in app_names(opts)]
+
+
+def removal_status(opts, table, app):
+    """'ok', or why the App Store does not uninstall this app now: not-offered, untested (not through the
+    campaign yet), disabled (by root), script-changed (an update of Swizzin changed a file it would run)."""
+    common, pins, apps = table
+    entry = apps.get(app)
+    if entry is None:
+        return "not-offered"
+    if not entry.tested:
+        return "untested"
+    if os.path.exists(opts.no_remove):
+        return "disabled"
+    for rel in common + entry.sources + (removable.script(app),):
+        try:
+            with open(os.path.join(opts.swizzin, rel), "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() not in pins.get(rel, ()):
+                    return "script-changed"
+        except OSError:
+            return "script-changed"
+    return "ok"
 
 
 def window(msg):
@@ -146,11 +197,12 @@ class Job:
 
     def __init__(self, opts, app, size, action="install"):
         self.app = app
-        self.action = action  # install (or remove, later): the page words its messages after it
+        self.action = action  # install or remove: the page words its messages after it
         self.id = time.strftime("%Y%m%d-%H%M%S") + "-" + app
         self.key = secrets.token_urlsafe(24)
-        self.phase = "install"  # install, then test, then done
-        self.result = None  # installed / failed / interrupted
+        # install, then test, then done; or the uninstaller's steps (REMOVE_PHASES), then done
+        self.phase = "install" if action == "install" else "check"
+        self.result = None  # installed / failed / interrupted; or removed / incomplete / failed
         self.test = None  # passed / failed
         self.retested = False  # the checks failed once and were run again
         self.retest_at = None  # when to run them again (time.monotonic())
@@ -162,6 +214,9 @@ class Job:
         self.replay, self.replay_len, self.trimmed = [], 0, False
         self.typed = 0
         self.controller = None
+        self.checks, self.archive, self.message, self.retry = [], None, None, False  # an uninstallation's outcome
+        self.state_path = os.path.join(opts.logs, self.id + ".state")  # written by remove_runner.py
+        self.result_path = os.path.join(opts.logs, self.id + ".result")
         try:
             self.log = os.fdopen(os.open(os.path.join(opts.logs, self.id + ".log"),
                                          os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab", buffering=0)
@@ -171,10 +226,13 @@ class Job:
         self.logged = 0
 
     def summary(self):
-        return {"id": self.id, "app": self.app, "action": self.action, "phase": self.phase, "result": self.result,
-                "test": self.test,
-                "generic_test": self.generic_test, "retested": self.retested, "started": int(self.started),
-                "ended": int(self.ended) if self.ended else None}
+        summary = {"id": self.id, "app": self.app, "action": self.action, "phase": self.phase, "result": self.result,
+                   "test": self.test,
+                   "generic_test": self.generic_test, "retested": self.retested, "started": int(self.started),
+                   "ended": int(self.ended) if self.ended else None}
+        if self.action == "remove":
+            summary.update(checks=self.checks, archive=self.archive, message=self.message, retry=self.retry)
+        return summary
 
     def replay_text(self):
         text = "".join(self.replay)
@@ -190,6 +248,7 @@ class Helper:
         self.clients = {}
         self.job = None  # the running installation, or the last one of this run
         self.last = None  # summary of the last finished installation
+        self.tickets = {}  # ticket -> (app, expiry): the confirmation window shown for an uninstallation
         if opts.allow_uid is not None:
             self.allowed, self.group = {0, opts.allow_uid}, None
         else:
@@ -283,7 +342,8 @@ class Helper:
                 pass
         op = msg.get("op") if isinstance(msg, dict) else None
         handler = {"catalogue": self._op_catalogue, "install": self._op_install, "attach": self._op_attach,
-                   "input": self._op_input, "resize": self._op_resize}.get(op) if isinstance(op, str) else None
+                   "input": self._op_input, "resize": self._op_resize, "remove-preview": self._op_remove_preview,
+                   "remove": self._op_remove}.get(op) if isinstance(op, str) else None
         if handler is None:
             self._send(c, {"ok": False, "error": "bad-request"})
             return
@@ -420,9 +480,197 @@ class Helper:
         except OSError:
             pass
 
+    # --- uninstalling ------------------------------------------------------------------------
+
+    def _runner_args(self, app, retry=False):
+        o = self.opts
+        args = ["--app", app, "--swizzin", o.swizzin, "--locks", o.locks, "--archives", o.archives, "--root", o.root,
+                "--work", o.work]
+        if o.table:
+            args += ["--table", o.table]
+        if retry:
+            args.append("--retry")
+        return args + list(o.runner_option)
+
+    def _runner_env(self):
+        env = dict(JOB_ENV)
+        if self.opts.test_path:
+            env["PATH"] = self.opts.test_path + ":" + env["PATH"]
+        for item in self.opts.test_env:
+            name, _, value = item.partition("=")
+            env[name] = value
+        return env
+
+    def _retry(self, app):
+        """Its last removal stopped halfway: trying again is allowed even though the lock may be gone."""
+        last = self.last or {}
+        return last.get("app") == app and last.get("action") == "remove" and last.get("result") == "incomplete"
+
+    def _remove_check(self, app):
+        if not isinstance(app, str) or not NAME.fullmatch(app):
+            return "invalid"
+        if app not in app_names(self.opts):
+            return "unknown"
+        status = removal_status(self.opts, removable.load(self.opts.table), app)
+        if status != "ok":
+            return {"not-offered": "not-removable", "untested": "not-removable"}.get(status, status)
+        if not installed(self.opts, app) and not self._retry(app):
+            return "not-installed"
+        if self.job is not None and self.job.phase != "done":
+            return "busy"
+        return None
+
+    def _op_remove_preview(self, c, msg):
+        app = msg.get("app")
+        try:
+            error = self._remove_check(app)
+        except OSError as e:
+            log.error("remove check: %s", e)
+            error = "unreadable"
+        if error:
+            self._send(c, {"ok": False, "error": error})
+            return
+        retry = self._retry(app) and not installed(self.opts, app)
+        try:
+            opts = remove_runner.options(self._runner_args(app, retry) + ["--state", os.devnull, "--result", os.devnull])
+            preview = remove_runner.Removal(opts).describe()
+        except remove_runner.Refused as e:
+            self._send(c, {"ok": False, "error": "refused", "message": str(e)})
+            return
+        ticket = secrets.token_urlsafe(18)
+        self.tickets = {ticket: (app, time.monotonic() + TICKET_TTL)}  # one window at a time: the newest wins
+        preview.update(app=app, retry=retry)
+        self._send(c, {"ok": True, "preview": preview, "ticket": ticket})
+
+    def _op_remove(self, c, msg):
+        app = msg.get("app")
+        try:
+            error = self._remove_check(app)
+        except OSError as e:
+            log.error("remove check: %s", e)
+            error = "unreadable"
+        if not error:
+            ticket, confirm = msg.get("ticket"), msg.get("confirm")
+            saved = self.tickets.pop(ticket, None) if isinstance(ticket, str) else None
+            if saved is None or saved[0] != app or time.monotonic() > saved[1]:
+                error = "bad-ticket"
+            elif not isinstance(confirm, str) or confirm.strip().lower() != app:  # the panel checked it too
+                error = "confirm-mismatch"
+        if error:
+            self._send(c, {"ok": False, "error": error})
+            return
+        retry = self._retry(app) and not installed(self.opts, app)
+        requester = msg.get("requester")
+        requester = re.sub(r"[^\w.:@ -]", "?", requester)[:100] if isinstance(requester, str) else "?"
+        for other in self.clients.values():  # the tabs that followed the previous job do not follow this one
+            other.attached = False
+        self.job = job = Job(self.opts, app, window(msg), action="remove")
+        job.retry = retry
+        job.controller, c.attached = c, True
+        self._save(job)
+        log.info("uninstalling %s for %s (job %s%s)", app, requester, job.id, ", trying again" if retry else "")
+        self._send(c, {"ok": True, "started": job.summary(), "control_key": job.key})
+        argv = [sys.executable, "-I", "-B", RUNNER, *self._runner_args(app, retry),
+                "--state", job.state_path, "--result", job.result_path]
+        self._spawn(job, argv, self._runner_env())
+
+    @staticmethod
+    def _runner_state(job):
+        try:
+            with open(job.state_path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _follow_runner(self, job):
+        """The uninstaller's step, read from its state file, passed on to the pages."""
+        phase = self._runner_state(job).get("phase")
+        if phase in REMOVE_PHASES and phase != job.phase:
+            job.phase = phase
+            self._broadcast({"phase": phase})
+
+    def _removal_result(self, job):
+        try:
+            with open(job.result_path) as f:
+                result = json.load(f)
+        except (OSError, ValueError):
+            result = None
+        if isinstance(result, dict):
+            job.result = result.get("result") if result.get("result") in ("removed", "incomplete", "failed") \
+                else "incomplete"
+            job.checks = [c for c in result.get("checks", []) if isinstance(c, dict)][:50]
+            job.archive, job.message = result.get("archive"), result.get("message")
+        else:  # the uninstaller stopped without a word
+            job.result = "incomplete" if self._runner_state(job).get("script_started") else "failed"
+            job.message = "the uninstaller stopped unexpectedly (see the log)"
+
+    def _wait_removal(self, job):
+        """This service is stopping during a removal. Before Swizzin's script, the uninstaller puts everything back
+        (as with Stop); once the script runs, it is never cut off: wait for its end."""
+        if job.pid is not None and not self._runner_state(job).get("script_started"):
+            try:
+                os.kill(job.pid, signal.SIGINT)
+            except OSError:
+                pass
+        end = time.monotonic() + REMOVE_STOP_WAIT
+        while job.pid is not None and time.monotonic() < end:
+            if job.fd is not None:
+                try:
+                    data = os.read(job.fd, 65536)
+                    if data:
+                        self._output(job, data)
+                except BlockingIOError:
+                    pass
+                except OSError:
+                    self._close_pty(job)
+            try:
+                pid, _ = os.waitpid(job.pid, os.WNOHANG)
+            except ChildProcessError:
+                pid = job.pid
+            if pid:
+                job.pid = None
+                break
+            time.sleep(0.2)
+        if job.pid is None:
+            self._close_pty(job)
+            self._removal_result(job)
+            self._finish(job)
+        else:
+            job.result, job.message = "incomplete", "the service stopped during the removal: try again to finish it"
+            job.phase, job.ended = "done", time.time()
+            self._save(job)
+
+    def _recover_removal(self, last, base):
+        """A removal cut off by a crash. Before Swizzin's script, nothing was removed: the app is put back as it was
+        (and an unfinished copy deleted). After, it is incomplete, and can be tried again."""
+        try:
+            with open(base + ".state") as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            state = {}
+        if state.get("script_started"):
+            last.update(result="incomplete", message="the service stopped during the removal: try again to finish it")
+            return
+        instances = state.get("instances") if isinstance(state.get("instances"), dict) else {}
+        if state.get("phase") in ("stop", "copy", "remove"):
+            enabled = [u for u, s in instances.items() if UNIT.fullmatch(u) and isinstance(s, dict) and s.get("enabled")]
+            active = [u for u, s in instances.items() if UNIT.fullmatch(u) and isinstance(s, dict) and s.get("active")]
+            for verb, units in (("enable", enabled), ("start", active)):
+                if units:
+                    subprocess.run(["systemctl", verb, *units], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=120)
+        archive = state.get("archive")
+        if state.get("phase") == "copy" and isinstance(archive, str) and \
+                os.path.dirname(archive) == os.path.normpath(self.opts.archives):
+            try:  # an unfinished copy
+                os.unlink(archive)
+            except OSError:
+                pass
+        last.update(result="failed", message="the service stopped before anything was removed: the app was put back")
+
     # --- the installation ----------------------------------------------------------------
 
-    def _spawn(self, job, argv):
+    def _spawn(self, job, argv, env=None):
         rows, cols = job.size
         pid, fd = pty.fork()  # new session, the pty as controlling terminal: installers can read /dev/tty
         if pid == 0:
@@ -434,7 +682,7 @@ class Helper:
                     signal.signal(sig, signal.SIG_DFL)
                 os.chdir(self.opts.home)
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-                os.execve(argv[0], argv, JOB_ENV)
+                os.execve(argv[0], argv, env or JOB_ENV)
             finally:
                 os._exit(127)
         os.set_blocking(fd, False)
@@ -485,6 +733,8 @@ class Helper:
         job = self.job
         if job is None or job.phase == "done":
             return
+        if job.action == "remove":
+            self._follow_runner(job)
         if job.retest_at is not None:
             if time.monotonic() >= job.retest_at:
                 job.retest_at = None
@@ -520,6 +770,10 @@ class Helper:
 
     def _next_phase(self, job):
         job.pid = None
+        if job.action == "remove":
+            self._removal_result(job)
+            self._finish(job)
+            return
         if job.phase == "install" and installed(self.opts, job.app):
             job.phase = "test"
             self._broadcast({"phase": "test", "generic_test": job.generic_test})
@@ -552,6 +806,9 @@ class Helper:
         job = self.job
         if job is None or job.phase == "done":
             return
+        if job.action == "remove":
+            self._wait_removal(job)
+            return
         if job.pid is not None:
             try:
                 os.killpg(job.pid, signal.SIGTERM)  # the installer leads its own session
@@ -583,13 +840,17 @@ class Helper:
             return
         last.setdefault("action", "install")  # saved by a version that only installed
         if last.get("phase") != "done":
-            last.update(phase="done", result="interrupted")
+            if last["action"] == "remove":
+                self._recover_removal(last, summaries[-1][:-len(".json")])
+            else:
+                last.update(result="interrupted")
+            last["phase"] = "done"
             with open(summaries[-1], "w") as f:
                 json.dump(last, f)
         self.last = last
 
     def _prune_logs(self):
-        for kind in ("*.log", "*.json"):
+        for kind in ("*.log", "*.json", "*.state", "*.result"):
             for path in sorted(glob.glob(os.path.join(self.opts.logs, kind)))[:-KEEP_LOGS]:
                 try:
                     os.unlink(path)
