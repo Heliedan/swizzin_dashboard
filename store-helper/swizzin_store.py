@@ -53,12 +53,14 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)  # -I leaves this folder out; install.sh checks that it belongs to root
+import check_app  # noqa: E402
 import removable  # noqa: E402
 import remove_runner  # noqa: E402
 
 NAME = re.compile(r"[a-z0-9]{1,32}")
 UNIT = re.compile(r"[A-Za-z0-9@._-]+\.service")
 RUNNER = os.path.join(HERE, "remove_runner.py")
+APP_CHECK = os.path.join(HERE, "check_app.py")
 # Not offered by the App Store, refused here: system components and tools that are set up on the
 # machine itself (over SSH), some of which change how the server is reached or secured, and xmrig,
 # a cryptocurrency miner that mines for the Swizzin project when it is not given a wallet.
@@ -105,6 +107,8 @@ def options(argv=None):
     p.add_argument("--allow-uid", type=int,
                    help="tests: allow this uid instead of the panel user, and leave the socket group alone")
     p.add_argument("--blocked", default=",".join(BLOCKED), help="comma-separated apps the store does not offer")
+    p.add_argument("--app-check", default=APP_CHECK,
+                   help="the App Store's own check, for the apps whose Swizzin check is wrong (check_app.py)")
     p.add_argument("--retest-delay", type=int, default=60,
                    help="seconds before checking an app again when its first checks failed (0: no second check)")
     p.add_argument("--swizzin", default="/etc/swizzin", help="Swizzin's folder (remove scripts and their environment)")
@@ -225,6 +229,8 @@ class Job:
         self.retested = False  # the checks failed once and were run again
         self.retest_at = None  # when to run them again (time.monotonic())
         self.generic_test = not os.path.isfile(os.path.join(opts.tests, app + ".sh"))
+        # Swizzin's check is wrong for these apps (check_app.py says why): the App Store's own check replaces it
+        self.check = "app-store" if action == "install" and app in check_app.SERVICES else "swizzin"
         self.started, self.ended = time.time(), None
         self.size = size
         self.pid = self.fd = self.exited_at = self.status = None
@@ -245,7 +251,7 @@ class Job:
 
     def summary(self):
         summary = {"id": self.id, "app": self.app, "action": self.action, "phase": self.phase, "result": self.result,
-                   "test": self.test,
+                   "test": self.test, "check": self.check,
                    "generic_test": self.generic_test, "retested": self.retested, "started": int(self.started),
                    "ended": int(self.ended) if self.ended else None}
         if self.action == "remove":
@@ -757,8 +763,7 @@ class Helper:
         if job.retest_at is not None:
             if time.monotonic() >= job.retest_at:
                 job.retest_at = None
-                self._broadcast({"phase": "test", "generic_test": job.generic_test})
-                self._spawn(job, [self.opts.box, "test", job.app])
+                self._start_checks(job)
             return
         if job.pid is None:
             return
@@ -795,10 +800,10 @@ class Helper:
             return
         if job.phase == "install" and installed(self.opts, job.app):
             job.phase = "test"
-            self._broadcast({"phase": "test", "generic_test": job.generic_test})
-            self._spawn(job, [self.opts.box, "test", job.app])
+            self._start_checks(job)
             return
-        if job.phase == "test" and job.status != 0 and not job.retested and self.opts.retest_delay > 0:
+        if job.phase == "test" and job.status != 0 and not job.retested and self.opts.retest_delay > 0 \
+                and job.check == "swizzin":  # the App Store's check already waits for a slow app
             job.retested, job.retest_at = True, time.monotonic() + self.opts.retest_delay
             self._output(job, ("\r\n[App Store] The checks failed. Some apps take a while to start: checking again "
                                "in {} seconds...\r\n".format(self.opts.retest_delay)).encode())
@@ -810,9 +815,20 @@ class Helper:
             job.result = "failed"
         self._finish(job)
 
+    def _start_checks(self, job):
+        self._broadcast({"phase": "test", "generic_test": job.generic_test, "check": job.check})
+        if job.check == "app-store":
+            self._spawn(job, [sys.executable, "-I", "-B", self.opts.app_check, job.app])
+        else:
+            self._spawn(job, [self.opts.box, "test", job.app])
+
     def _finish(self, job):
         job.phase, job.ended = "done", time.time()
-        log.info("job %s: %s (checks: %s, %d characters typed)", job.id, job.result, job.test, job.typed)
+        if job.action == "remove":
+            checks = "%d/%d passed" % (sum(1 for c in job.checks if c.get("ok")), len(job.checks)) if job.checks else "none"
+        else:
+            checks = job.test
+        log.info("job %s: %s (checks: %s, %d characters typed)", job.id, job.result, checks, job.typed)
         self._save(job)
         self.last = job.summary()
         self._broadcast({"done": job.summary()})

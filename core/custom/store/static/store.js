@@ -236,9 +236,12 @@
     if (done.result === "installed" && done.test === "passed") {
       return ["Installed ✓ — checks passed", "success"];
     }
+    if (done.result === "installed" && done.check === "app-store") {  // the App Store's own check (check_app.py)
+      return ["Installed, but it does not seem to run: read the terminal", "warning"];
+    }
     if (done.result === "installed") {
       var item = card(done.app);
-      if (item && item.getAttribute("data-check") === "unreliable") {  // see UNRELIABLE_CHECK in __init__.py
+      if (item && item.getAttribute("data-check") === "unreliable") {  // a helper older than check_app.py
         return ["Installed — Swizzin's check cannot verify this app: open it to make sure it runs", "info"];
       }
       var later = done.retested ? ", also a minute later" : "";

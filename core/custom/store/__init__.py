@@ -87,7 +87,8 @@ NOTES = {
     "transmission": (_EXPOSED.format(9091), None),
 }
 # Swizzin's checks (box test) fail for these although the app works (the generic check cannot find the port or
-# the service, or does not expect what the app answers): the page says so instead of reporting a failure.
+# the service, or does not expect what the app answers). The helper checks them itself (store-helper/check_app.py,
+# same apps); with a helper older than that, the page says Swizzin's check cannot verify them.
 UNRELIABLE_CHECK = {"bazarr", "btsync", "emby", "filebrowser", "flood", "jackett", "lidarr", "medusa", "organizr",
                     "prowlarr", "quassel", "qui", "radarr", "sickgear", "sonarr", "syncthing"}
 

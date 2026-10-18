@@ -5,7 +5,8 @@ Installed under those names in a folder put first in PATH. They share a JSON sta
 the fake root $STORE_TEST_ROOT) and note every call in fake-calls.log, so that the tests can check what was run.
 State: {"units": {name: {"active", "enabled", "user", "file" (path of its unit file under the fake root),
 "package"}}, "packages": {name: status}, "rdeps": {package: [packages removed along]}, "apt_check": code,
-"audit": text, "nginx_ok": bool, "apt_daily": state, "sim_extra": [lines added to apt-get -s]}.
+"audit": text, "nginx_ok": bool, "apt_daily": state, "sim_extra": [lines added to apt-get -s],
+"listening": [ports], "listening_pids": [[port, pid]]}.
 """
 import fcntl
 import fnmatch
@@ -161,6 +162,8 @@ def nginx(state, args):
 def ss(state, args):
     for port in state.get("listening", []):
         print("LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:*" % port)
+    for port, pid in state.get("listening_pids", []):  # with the process, as ss -p shows it
+        print('LISTEN 0 4096 *:%s *:* users:(("app",pid=%d,fd=3))' % (port, pid))
     return 0
 
 

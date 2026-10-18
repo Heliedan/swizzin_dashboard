@@ -257,6 +257,11 @@ class UninstallTexts(unittest.TestCase):
         self.assertEqual(set(store.REMOVE_SSH_ONLY), set(removable.EXCLUDED))
         self.assertEqual(set(store.REMOVE_CONFLICT), {a for a, e in removable.APPS.items() if e.refuse_if})
 
+    def test_the_apps_checked_by_the_app_store_are_the_unreliable_ones(self):
+        sys.path.insert(0, os.path.join(ROOT, "store-helper"))
+        import check_app
+        self.assertEqual(set(check_app.SERVICES), store.UNRELIABLE_CHECK)
+
 
 if __name__ == "__main__":
     try:

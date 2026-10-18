@@ -45,7 +45,7 @@ fi
 # Root will run these files: each one, and every folder from here up to /, must belong to root and be writable
 # by root only. Otherwise another user (the panel's, for one) could change them, or swap them in between.
 unsafe() { [[ $(stat -c %u "$1") != 0 ]] || (( 8#$(stat -c %a "$1") & 8#022 )); }
-FILES=(swizzin_store.py removable.py remove_runner.py)
+FILES=(swizzin_store.py removable.py remove_runner.py check_app.py)
 for f in "${FILES[@]/#/$HERE/}" "$HERE/swizzin-store.service" "$HERE/needrestart.conf"; do
     if unsafe "$f"; then
         echo "Refusing to install $f: it must belong to root and be writable by root only." >&2

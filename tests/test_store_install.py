@@ -24,7 +24,7 @@ LOCKS="@LOCKS@"
 cmd=$1; app=$2
 if [ "$cmd" = test ]; then
     echo "checking $app"
-    [ "$app" = flood ] && exit 1
+    [ "$app" = airsonic ] && exit 1
     if [ "$app" = mylar ] && [ ! -e "$LOCKS/../mylar-checked" ]; then   # slow to start: fails only the first time
         touch "$LOCKS/../mylar-checked"; exit 1
     fi
@@ -50,7 +50,7 @@ case "$app" in
         ls -l /proc/$$/fd > "$LOCKS/../fds.txt" ;;   # a plain redirection: no pipe of our own in the list
     jackett)  # a long installation
         echo "working"; sleep 30 ;;
-    flood)    # installs, but its health check fails
+    airsonic) # installs, but its health check fails
         touch "$LOCKS/.$app.lock" ;;
     mylar)    # installs, but takes a while to start: its first health check fails
         touch "$LOCKS/.$app.lock" ;;
@@ -58,6 +58,13 @@ case "$app" in
         choice=$(whiptail --menu "Pick a version" 12 40 3 a Alpha b Beta c Gamma 3>&1 1>&2 2>&3)
         echo "picked $choice"; [ "$choice" = b ] && touch "$LOCKS/.$app.lock" ;;
 esac
+"""
+
+# Fake store-helper/check_app.py (the App Store's own check, for the apps whose Swizzin check is wrong):
+# passes, unless the test created the file check-fails.
+FAKE_CHECK = r"""import os, sys
+print("app-store check " + sys.argv[1], flush=True)
+sys.exit(1 if os.path.exists(os.path.join("@BASE@", "check-fails")) else 0)
 """
 
 
@@ -104,7 +111,7 @@ class Conn:
 def fake_installers(base):
     """fake_swizzin() plus the fake box, its apps, health checks, home and logs; the helper's extra options."""
     fake_swizzin(base)
-    for app in ("sonarr", "radarr", "lidarr", "bazarr", "autobrr", "jackett", "flood", "medusa", "deluge", "mylar"):
+    for app in ("sonarr", "radarr", "lidarr", "bazarr", "autobrr", "jackett", "airsonic", "medusa", "deluge", "mylar"):
         open(os.path.join(base, "scripts", app + ".sh"), "w").close()
     open(os.path.join(base, "locks", ".medusa.lock"), "w").close()
     os.makedirs(os.path.join(base, "tests"))
@@ -114,8 +121,11 @@ def fake_installers(base):
     with open(box, "w") as f:
         f.write(FAKE_BOX.replace("@LOCKS@", os.path.join(base, "locks")))
     os.chmod(box, 0o755)
+    check = os.path.join(base, "check_app.py")
+    with open(check, "w") as f:
+        f.write(FAKE_CHECK.replace("@BASE@", base))
     return ("--box", box, "--tests", os.path.join(base, "tests"), "--home", os.path.join(base, "home"),
-            "--logs", os.path.join(base, "logs"), "--retest-delay", "1")
+            "--logs", os.path.join(base, "logs"), "--retest-delay", "1", "--app-check", check)
 
 
 class Install(unittest.TestCase):
@@ -157,13 +167,13 @@ class Install(unittest.TestCase):
         c.send(op="resize", rows=40, cols=120)
         c.send(op="input", data="y\r")
         phase = c.until(lambda m: "phase" in m)
-        self.assertEqual(phase, {"phase": "test", "generic_test": False})
+        self.assertEqual(phase, {"phase": "test", "generic_test": False, "check": "app-store"})
         done = self.done(c)
         self.assertEqual((done["result"], done["test"], done["generic_test"]), ("installed", "passed", False))
         self.assertEqual(done["action"], "install")
         self.assertFalse(done["retested"])  # passed the first time: checked once
         self.assertIn("size 40 120", c.output)  # the installer saw the new window size
-        self.assertIn("checking sonarr", c.output)
+        self.assertIn("app-store check sonarr", c.output)
         self.assertTrue(os.path.exists(os.path.join(self.base, "locks", ".sonarr.lock")))
         log, summary = glob.glob(os.path.join(self.logs, "*.log"))[0], glob.glob(os.path.join(self.logs, "*.json"))[0]
         self.assertEqual(stat.S_IMODE(os.stat(log).st_mode), 0o600)  # installers can print passwords
@@ -187,14 +197,33 @@ class Install(unittest.TestCase):
         self.assertNotIn("checking", c.output)
 
     def test_failed_checks_are_run_again_once(self):
-        c, _ = self.install("flood")
-        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True})
+        c, _ = self.install("airsonic")
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True, "check": "swizzin"})
         self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "retest", "seconds": 1})
-        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True})
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True, "check": "swizzin"})
         done = self.done(c)
-        self.assertEqual((done["result"], done["test"], done["retested"]), ("installed", "failed", True))
-        self.assertEqual(c.output.count("checking flood"), 2)
+        self.assertEqual((done["result"], done["test"], done["retested"], done["check"]),
+                         ("installed", "failed", True, "swizzin"))
+        self.assertEqual(c.output.count("checking airsonic"), 2)
         self.assertIn("checking again in 1 seconds", c.output)
+
+    def test_the_app_store_checks_the_apps_whose_swizzin_check_is_wrong(self):
+        c, _ = self.install("bazarr")
+        self.assertEqual(c.until(lambda m: "phase" in m), {"phase": "test", "generic_test": True, "check": "app-store"})
+        done = self.done(c)
+        self.assertEqual((done["result"], done["test"], done["retested"], done["check"]),
+                         ("installed", "passed", False, "app-store"))
+        self.assertIn("app-store check bazarr", c.output)
+        self.assertNotIn("checking bazarr", c.output)  # Swizzin's check is not run: its red lines would be wrong
+
+    def test_a_failed_app_store_check_is_not_run_again(self):
+        open(os.path.join(self.base, "check-fails"), "w").close()
+        c, _ = self.install("bazarr")
+        done = self.done(c)
+        self.assertEqual((done["result"], done["test"], done["retested"], done["check"]),
+                         ("installed", "failed", False, "app-store"))  # it already waited for a slow start
+        self.assertEqual(c.output.count("app-store check bazarr"), 1)
+        self.assertNotIn("checking again", c.output)
 
     def test_slow_app_passes_the_second_checks(self):
         c, _ = self.install("mylar")
@@ -203,7 +232,7 @@ class Install(unittest.TestCase):
         self.assertEqual(c.output.count("checking mylar"), 2)
 
     def test_watcher_sees_the_second_checks(self):
-        c, _ = self.install("flood")
+        c, _ = self.install("airsonic")
         c.until(lambda m: m.get("phase") == "retest")
         w = self.conn()
         w.send(op="attach")
@@ -343,7 +372,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.done(w)["result"], "installed")
 
     def test_typing_while_no_installer_runs_is_ignored(self):
-        c, _ = self.install("flood")  # its checks fail: one second without a terminal before the second check
+        c, _ = self.install("airsonic")  # its checks fail: one second without a terminal before the second check
         c.until(lambda m: m.get("phase") == "retest")
         c.send(op="input", data="x")
         msg = c.until(lambda m: "done" in m or "error" in m)
@@ -379,17 +408,17 @@ class Install(unittest.TestCase):
         self.assertEqual(c.until(lambda m: "error" in m), {"ok": False, "error": "invalid"})
 
     def test_last_installation_is_reported(self):
-        c, _ = self.install("flood")
+        c, _ = self.install("airsonic")
         self.done(c)
         c.send(op="catalogue")
         reply = c.until(lambda m: "apps" in m)
         self.assertIsNone(reply["job"])
-        self.assertEqual((reply["last"]["app"], reply["last"]["result"]), ("flood", "installed"))
+        self.assertEqual((reply["last"]["app"], reply["last"]["result"]), ("airsonic", "installed"))
         self.helper.stop()  # and still after a restart
         self.helper = Helper(self.base, extra=self.extra)
         c2 = self.conn()
         c2.send(op="catalogue")
-        self.assertEqual(c2.recv()["last"]["app"], "flood")
+        self.assertEqual(c2.recv()["last"]["app"], "airsonic")
 
     def test_stopping_the_service_marks_the_installation_interrupted(self):
         c, _ = self.install("jackett")
