@@ -85,14 +85,23 @@ def cgroup_has(pid, unit):
 
 
 def ports(unit):
-    """The TCP ports a process of this service listens on."""
-    out = command("ss", "-ltnpH")[1]
+    """The TCP ports a process of this service listens on.
+
+    ss -e names the socket's cgroup (the service), which needs no right over the process; ss -p names the process,
+    which root cannot see without CAP_SYS_PTRACE (in some containers), so it is only used where no cgroup is given
+    (older kernels or iproute2)."""
+    out = command("ss", "-ltnpeH")[1]
     found = set()
     for line in out.splitlines():
         fields = line.split()
         if len(fields) < 4:
             continue
-        if any(cgroup_has(pid, unit) for pid in re.findall(r"pid=(\d+)", line)):
+        cgroup = re.search(r"\bcgroup:(\S+)", line)
+        if cgroup:
+            mine = unit in cgroup.group(1).split("/")
+        else:
+            mine = any(cgroup_has(pid, unit) for pid in re.findall(r"pid=(\d+)", line))
+        if mine:
             found.add(fields[3].rsplit(":", 1)[-1])
     return sorted(found, key=lambda p: (len(p), p))
 

@@ -61,6 +61,18 @@ class Check(unittest.TestCase):
         self.assertIn("Jackett: checks passed.", out)
         self.assertNotIn("Waiting", out)  # ready at once: no waiting line
 
+    def test_the_socket_cgroup_is_enough(self):
+        # ss -e gives the socket's cgroup even when root may not see the process (no CAP_SYS_PTRACE, in a container)
+        self.service("jackett@alice.service")
+        state = self.w.load()
+        state["listening_cgroups"] = [["9117", "/system.slice/system-jackett.slice/jackett@alice.service"],
+                                      ["9118", "/system.slice/system-jackett.slice/jackett@bob.service"]]
+        self.w.save()
+        code, out = self.check("jackett", "--wait", "0")
+        self.assertEqual(code, 0)
+        self.assertIn("✓ It is listening on port 9117", out)
+        self.assertNotIn("9118", out)  # bob's instance is not alice's
+
     def test_a_service_that_does_not_run_fails(self):
         self.service("lidarr.service", active="failed")
         code, out = self.check("lidarr", "--wait", "0")

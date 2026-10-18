@@ -6,7 +6,7 @@ the fake root $STORE_TEST_ROOT) and note every call in fake-calls.log, so that t
 State: {"units": {name: {"active", "enabled", "user", "file" (path of its unit file under the fake root),
 "package"}}, "packages": {name: status}, "rdeps": {package: [packages removed along]}, "apt_check": code,
 "audit": text, "nginx_ok": bool, "apt_daily": state, "sim_extra": [lines added to apt-get -s],
-"listening": [ports], "listening_pids": [[port, pid]]}.
+"listening": [ports], "listening_pids": [[port, pid]], "listening_cgroups": [[port, cgroup]]}.
 """
 import fcntl
 import fnmatch
@@ -164,6 +164,8 @@ def ss(state, args):
         print("LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:*" % port)
     for port, pid in state.get("listening_pids", []):  # with the process, as ss -p shows it
         print('LISTEN 0 4096 *:%s *:* users:(("app",pid=%d,fd=3))' % (port, pid))
+    for port, cgroup in state.get("listening_cgroups", []):  # with the socket's cgroup, as ss -e shows it
+        print("LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:* uid:1001 ino:1 sk:1 cgroup:%s <->" % (port, cgroup))
     return 0
 
 
