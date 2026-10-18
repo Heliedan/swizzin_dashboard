@@ -459,6 +459,16 @@ class Pieces(unittest.TestCase):
         self.assertIn("not enough free space", str(e.exception))
 
 
+    def test_a_disk_that_fills_up_during_the_copy_is_said_in_words(self):
+        full = OSError(28, "No space left on device")
+        with mock.patch.dict(os.environ, self.w.env()):
+            self.r.phase_check()
+            with mock.patch("os.fsync", side_effect=full), self.assertRaises(remove_runner.Refused) as e:
+                self.r.phase_copy()
+        self.assertEqual(str(e.exception), "the copy of its settings failed: the disk is full. Free some space, then try again")
+        self.assertEqual(os.listdir(self.w.archives), [])  # an unfinished copy does not stay
+        self.assertEqual(remove_runner.copy_error(PermissionError(13, "Permission denied", "/x")), "Permission denied (/x)")
+
     def program(self, path):
         """A real process whose program lies at path in the fake root (a copy of sleep)."""
         real = self.w.path(path)

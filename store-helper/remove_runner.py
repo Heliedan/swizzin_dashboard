@@ -20,6 +20,7 @@ Standard library only. The table of apps is removable.py, next to this file.
 """
 import argparse
 import codecs
+import errno
 import fcntl
 import fnmatch
 import hashlib
@@ -57,6 +58,15 @@ def in_this_system(pid, proc="/proc"):
         return os.readlink("%s/%s/ns/pid" % (proc, pid)) == os.readlink("%s/self/ns/pid" % proc)
     except OSError:
         return True  # cannot tell: counted
+
+
+def copy_error(e):
+    """Why a copy failed, in words (not "[Errno 28] ...")."""
+    if isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT):
+        return "the disk is full. Free some space, then try again"
+    if isinstance(e, OSError) and e.strerror:
+        return e.strerror + (" (%s)" % e.filename if e.filename else "")
+    return str(e)
 
 
 class Refused(Exception):
@@ -525,7 +535,9 @@ class Removal:
                 pass
             self.archive = None
             self.save_state()
-            raise e if isinstance(e, Refused) else Refused("the copy of its settings failed: %s" % e)
+            if isinstance(e, Refused):
+                raise
+            raise Refused("the copy of its settings failed: " + copy_error(e))
         files = sum(1 for m in manifest if m["type"] == "file")
         say("Copy saved: %s (%d files, %s)." % (path, files, human(os.path.getsize(path))))
         for where, why in self.skipped:
