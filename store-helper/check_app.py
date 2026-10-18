@@ -40,6 +40,12 @@ SERVICES = {
     "syncthing": "syncthing@",
 }
 
+# As the page names them (Swizzin's core/profiles.py)
+NAMES = {"bazarr": "Bazarr", "btsync": "Resilio Sync", "emby": "Emby", "filebrowser": "Filebrowser", "flood": "Flood",
+         "jackett": "Jackett", "lidarr": "Lidarr", "medusa": "Medusa", "organizr": "Organizr", "prowlarr": "Prowlarr",
+         "quassel": "Quassel-Core", "qui": "qui", "radarr": "Radarr", "sickgear": "SickGear", "sonarr": "Sonarr",
+         "syncthing": "Syncthing"}
+
 
 def say(text):
     sys.stdout.write("[App Store] " + text + "\r\n")
@@ -91,7 +97,7 @@ def ports(unit):
     return sorted(found, key=lambda p: (len(p), p))
 
 
-def check_services(app, base, wait):
+def check_services(name, base, wait):
     patterns = [base[:-1] + "@*.service"] if base.endswith("@") else [base + ".service"]
     deadline = time.monotonic() + wait
     waited = False
@@ -103,7 +109,7 @@ def check_services(app, base, wait):
             break
         if time.monotonic() >= deadline:
             if not found:
-                say("✗ No service of %s was found (%s)" % (app, ", ".join(patterns)))
+                say("✗ No service of %s was found (%s)" % (name, ", ".join(patterns)))
                 return False
             for u in found:
                 if states[u] != "active":
@@ -112,7 +118,7 @@ def check_services(app, base, wait):
                     say("✗ Its service runs but listens on no port: %s" % u)
             return False
         if not waited:
-            say("Waiting for %s to start (%d seconds at most)..." % (app, wait))
+            say("Waiting for %s to start (%d seconds at most)..." % (name, wait))
             waited = True
         time.sleep(2)
     for u in found:
@@ -149,12 +155,13 @@ def main(argv=None):
     p.add_argument("--wait", type=int, default=WAIT, help="seconds the app may take to start")
     p.add_argument("--nginx-apps", default="/etc/nginx/apps", help="nginx's folder of app pages")
     opts = p.parse_args(argv)
-    say("Swizzin's own check does not work for %s: the App Store checks it instead." % opts.app)
+    name = NAMES[opts.app]
+    say("Swizzin's own check does not work for %s: the App Store checks it instead." % name)
     if SERVICES[opts.app] is None:
         ok = check_organizr(opts.nginx_apps)
     else:
-        ok = check_services(opts.app, SERVICES[opts.app], opts.wait)
-    say("%s: checks passed." % opts.app if ok else "%s does not seem to run: see above." % opts.app)
+        ok = check_services(name, SERVICES[opts.app], opts.wait)
+    say("%s: checks passed." % name if ok else "%s does not seem to run: see above." % name)
     return 0 if ok else 1
 
 

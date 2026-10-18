@@ -55,10 +55,10 @@ class Check(unittest.TestCase):
         self.service("jackett@bob.service", port="9118", pid=102)
         code, out = self.check("jackett", "--wait", "0")
         self.assertEqual(code, 0)
-        self.assertIn("Swizzin's own check does not work for jackett", out)
+        self.assertIn("Swizzin's own check does not work for Jackett", out)
         self.assertIn("✓ Its service runs: jackett@alice.service", out)
         self.assertIn("✓ It is listening on port 9118", out)
-        self.assertIn("jackett: checks passed.", out)
+        self.assertIn("Jackett: checks passed.", out)
         self.assertNotIn("Waiting", out)  # ready at once: no waiting line
 
     def test_a_service_that_does_not_run_fails(self):
@@ -66,7 +66,7 @@ class Check(unittest.TestCase):
         code, out = self.check("lidarr", "--wait", "0")
         self.assertEqual(code, 1)
         self.assertIn("✗ Its service does not run: lidarr.service (failed)", out)
-        self.assertIn("lidarr does not seem to run", out)
+        self.assertIn("Lidarr does not seem to run", out)
 
     def test_one_instance_down_fails(self):
         self.service("flood@alice.service", port="3000", pid=101)
@@ -87,7 +87,7 @@ class Check(unittest.TestCase):
     def test_no_service_fails(self):
         code, out = self.check("bazarr", "--wait", "0")
         self.assertEqual(code, 1)
-        self.assertIn("✗ No service of bazarr was found (bazarr.service)", out)
+        self.assertIn("✗ No service of Bazarr was found (bazarr.service)", out)
 
     def test_a_slow_app_is_waited_for(self):
         self.service("emby-server.service", port="8096", pid=101)
@@ -97,7 +97,7 @@ class Check(unittest.TestCase):
             t = time.monotonic()
             code, out = self.check("emby", "--wait", "20")
         self.assertEqual(code, 0)
-        self.assertIn("Waiting for emby to start (20 seconds at most)...", out)
+        self.assertIn("Waiting for Emby to start (20 seconds at most)...", out)
         self.assertIn("✓ It is listening on port 8096", out)
         self.assertLess(time.monotonic() - t, 10)  # stops waiting as soon as it is up
 
@@ -135,6 +135,7 @@ class Check(unittest.TestCase):
     def test_every_app_names_its_service(self):
         for app, base in check_app.SERVICES.items():
             self.assertTrue(base is None or base.replace("@", "").replace("-", "").isalnum(), app)
+        self.assertEqual(set(check_app.NAMES), set(check_app.SERVICES))  # and is named as on the page
 
 
 if __name__ == "__main__":
