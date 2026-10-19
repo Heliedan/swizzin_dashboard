@@ -2,6 +2,7 @@
 
 Run from the repository root: python tests/test_store_install.py
 (the helper runs as a subprocess, without root, on temporary folders: nothing is installed)."""
+import errno
 import glob
 import json
 import os
@@ -24,7 +25,10 @@ LOCKS="@LOCKS@"
 cmd=$1; app=$2
 if [ "$cmd" = test ]; then
     echo "checking $app"
-    [ "$app" = airsonic ] && exit 1
+    if [ "$app" = airsonic ]; then   # its checks fail; when the test made the FIFO "gate", the second one waits for it
+        [ -e "$LOCKS/../airsonic-checked" ] && [ -p "$LOCKS/../gate" ] && cat "$LOCKS/../gate" > /dev/null
+        touch "$LOCKS/../airsonic-checked"; exit 1
+    fi
     if [ "$app" = mylar ] && [ ! -e "$LOCKS/../mylar-checked" ]; then   # slow to start: fails only the first time
         touch "$LOCKS/../mylar-checked"; exit 1
     fi
@@ -109,6 +113,19 @@ class Conn:
 
     def close(self):
         self.s.close()
+
+
+def open_gate(path, timeout=15):
+    """Lets go a fake script that waits on the FIFO path, as soon as it waits on it."""
+    end = time.monotonic() + timeout
+    while True:
+        try:
+            os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))  # the reader gets end of file and goes on
+            return
+        except OSError as e:
+            if e.errno != errno.ENXIO or time.monotonic() > end:  # ENXIO: nobody reads it yet
+                raise
+        time.sleep(0.05)
 
 
 def fake_installers(base):
@@ -235,6 +252,8 @@ class Install(unittest.TestCase):
         self.assertEqual(c.output.count("checking mylar"), 2)
 
     def test_watcher_sees_the_second_checks(self):
+        gate = os.path.join(self.base, "gate")
+        os.mkfifo(gate)  # the second checks wait for it: the watcher comes before they end, however late
         c, _ = self.install("airsonic")
         c.until(lambda m: m.get("phase") == "retest")
         w = self.conn()
@@ -243,6 +262,7 @@ class Install(unittest.TestCase):
         self.assertEqual(attached["attached"]["phase"], "test")  # still checking while it waits
         w.until(lambda m: "output" in m)
         self.assertIn("checking again", w.output)  # replayed
+        open_gate(gate)
         self.assertEqual(self.done(w)["test"], "failed")
 
     def test_installer_environment(self):
