@@ -400,17 +400,16 @@ class Runner(unittest.TestCase):
         self.assertEqual(os.listdir(self.w.archives), [])  # an unfinished copy does not stay
 
     def test_ctrl_c_during_the_script_is_ignored(self):
-        self.w.app("demo", "sleep 2\n" + DEMO, **self.w.apps["demo"])
-        p = self.w.start(STORE_TEST_PAUSE="remove:0.1")
-        for _ in range(200):
-            if os.path.exists(os.path.join(self.w.base, "state.json")) and \
-                    json.load(open(os.path.join(self.w.base, "state.json")))["script_started"]:
-                break
-            time.sleep(0.05)
+        script = ('echo "demo script running"\n'
+                  'for i in $(seq 1200); do [ -e "$STORE_TEST_ROOT/go" ] && break; sleep 0.05; done\n')
+        self.w.app("demo", script + DEMO, **self.w.apps["demo"])  # runs until the test lets it go (60 s at most)
+        p = self.w.start()
+        out = self.w.wait_output(p, "demo script running")
         p.send_signal(signal.SIGINT)
-        out = p.communicate(timeout=60)[0].decode()
+        out += self.w.wait_output(p, "Stopping is not possible now")
+        open(self.w.path("/go"), "w").close()
+        out = (out + p.communicate(timeout=60)[0]).decode()
         self.assertEqual(self.w.result()["result"], "removed", out)
-        self.assertIn("Stopping is not possible now", out)
 
     def test_an_app_started_again_meanwhile_is_put_back(self):
         # someone starts it from the panel's switch, after it was stopped, just before Swizzin's script
