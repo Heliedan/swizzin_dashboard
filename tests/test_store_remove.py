@@ -217,7 +217,9 @@ class Remove(unittest.TestCase):
         self.start("--test-env", "STORE_TEST_PAUSE=copy:3")
         c, started = self.remove()
         c.until(lambda m: m.get("phase") == "copy", timeout=30)
-        self.helper.stop()  # systemctl stop swizzin-store, or a reboot
+        # systemctl stop swizzin-store, or a reboot. stop() returns when the helper has put the app back and ended,
+        # which takes the rest of the 3-second pause and more: 5 s was no limit for a hung helper, only a deadline.
+        self.helper.stop(timeout=60)
         with open(glob.glob(os.path.join(self.logs, "*.json"))[0]) as f:
             summary = json.load(f)
         self.assertEqual(summary["result"], "failed")
