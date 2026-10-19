@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # The panel's target system: Ubuntu 24.04 and its own Python 3.12.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Swizzin at the commit the uninstaller was checked against (AUDITED in
+      # store-helper/removable.py): tests/test_removable.py compares them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: swizzin/swizzin
+          ref: 1bb13215fb16368e13859cddbed48fb9a3e6169c
+          path: swizzin-src
+          persist-credentials: false
+
+      - name: Install the panel's requirements
+        run: |
+          python3 -m venv venv
+          venv/bin/pip install --quiet -r requirements.txt
+
+      # Each file runs on its own: some tests import the panel, which patches
+      # the whole process (eventlet), and the others must not see that.
+      - name: Run the tests
+        env:
+          SWIZZIN_SRC: swizzin-src
+        run: |
+          failed=""
+          for test in tests/test_*.py; do
+            echo "::group::$test"
+            venv/bin/python "$test" || failed="$failed $test"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed:$failed"
+            exit 1
+          fi
