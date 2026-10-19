@@ -177,6 +177,7 @@ class Remove(unittest.TestCase):
         # Ended here, while the helper can still reap it. Left to tearDown, the fake box outlives the helper and
         # waits as a zombie named "box" until PID 1 collects it, which some containers do late or never:
         # the next removal would then refuse with "box is running".
+        c.wait_output("box install other")  # the installer really runs: before its exec, it is not named "box" yet
         subprocess.run(["pkill", "-9", "-P", str(self.helper.proc.pid), "-x", "box"], stderr=subprocess.DEVNULL)
         c.until(lambda m: "done" in m)
 
