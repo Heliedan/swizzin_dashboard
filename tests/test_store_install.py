@@ -95,7 +95,10 @@ class Conn:
     def until(self, test, timeout=15):
         end = time.time() + timeout
         while time.time() < end:
-            msg = self.recv(max(end - time.time(), 0.1))
+            try:
+                msg = self.recv(max(end - time.time(), 0.1))
+            except socket.timeout:  # nothing more came: the output says why
+                break
             if test(msg):
                 return msg
         raise AssertionError("timed out; output so far: " + self.output[-500:])
