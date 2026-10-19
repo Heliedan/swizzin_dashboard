@@ -47,7 +47,9 @@ for t in tests/test_*.py; do venv/bin/python "$t"; done
 Each test file runs on its own, in its own Python process.
 Every file must end with `OK`.
 If `tests/test_removable.py` ends with `OK (skipped=...)`, it did not find Swizzin: check `SWIZZIN_SRC`.
-The tests do not need root.
+The tests do not need root: run them as a normal user.
+As root, `tests/test_store_helper.py` ends with `OK (skipped=2)`: the helper always lets root in,
+so the two tests of refused connections cannot run.
 
 ## Changes to the uninstall table
 

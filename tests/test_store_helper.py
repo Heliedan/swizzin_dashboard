@@ -134,6 +134,7 @@ class StoreHelper(unittest.TestCase):
         with self.helper.connect() as s:  # the helper itself is fine
             self.assertTrue(ask(s, b'{"op": "catalogue"}\n')["ok"])
 
+    @unittest.skipIf(os.geteuid() == 0, "as root, the test connects as uid 0, which the helper always lets in")
     def test_other_users_are_refused(self):
         self.helper.stop()
         self.helper = Helper(self.base, allow_uid=os.getuid() + 12345)
@@ -142,6 +143,7 @@ class StoreHelper(unittest.TestCase):
         self.assertIn("connection refused (uid {}".format(os.getuid()), self.helper.stop())
         self.helper = Helper(self.base)
 
+    @unittest.skipIf(os.geteuid() == 0, "as root, the test connects as uid 0, which the 8-client limit does not count")
     def test_at_most_eight_clients(self):
         clients = [self.helper.connect() for _ in range(8)]
         try:
