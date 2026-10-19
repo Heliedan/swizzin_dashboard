@@ -5,8 +5,10 @@ Installed under those names in a folder put first in PATH. They share a JSON sta
 the fake root $STORE_TEST_ROOT) and note every call in fake-calls.log, so that the tests can check what was run.
 State: {"units": {name: {"active", "enabled", "user", "file" (path of its unit file under the fake root),
 "package"}}, "packages": {name: status}, "rdeps": {package: [packages removed along]}, "apt_check": code,
-"audit": text, "nginx_ok": bool, "apt_daily": state, "sim_extra": [lines added to apt-get -s],
-"listening": [ports], "listening_pids": [[port, pid]], "listening_cgroups": [[port, cgroup]]}.
+"audit": text, "nginx_ok": bool, "apt_daily": state, "apt_daily_on_stop": the apt_daily that the next systemctl stop
+sets, "active_in_phase": {unit: the uninstaller's step during which systemctl is-active says active},
+"sim_extra": [lines added to apt-get -s], "listening": [ports], "listening_pids": [[port, pid]],
+"listening_cgroups": [[port, cgroup]]}.
 """
 import fcntl
 import fnmatch
@@ -46,6 +48,15 @@ def loaded(state, name):
     return not unit.get("file") or os.path.exists(os.path.join(ROOT, unit["file"].lstrip("/")))
 
 
+def runner_phase():
+    """The uninstaller's step, from the state file that test_remove_runner gives it (next to the fake root)."""
+    try:
+        with open(os.path.join(os.path.dirname(ROOT.rstrip("/")), "state.json")) as f:
+            return json.load(f).get("phase")
+    except (OSError, ValueError):
+        return None
+
+
 def systemctl(state, args):
     args = [a for a in args if a not in ("-q", "--quiet", "--no-pager")]
     cmd = args[0]
@@ -65,6 +76,9 @@ def systemctl(state, args):
             value = state.get("apt_daily", "inactive")
         else:
             value = state["units"].get(name, {}).get("active", "inactive") if loaded(state, name) else "inactive"
+        phase = state.get("active_in_phase", {}).get(name)
+        if phase and phase == runner_phase():  # someone started it meanwhile (the panel's switch)
+            value = "active"
         print(value)
         return 0 if value == "active" else 3
     if cmd == "is-enabled":
@@ -78,6 +92,8 @@ def systemctl(state, args):
                 print("%s loaded %s running fake" % (name, state["units"][name].get("active", "inactive")))
         return 0
     if cmd in ("stop", "start", "enable", "disable"):
+        if cmd == "stop" and "apt_daily_on_stop" in state:  # the automatic updates start meanwhile
+            state["apt_daily"] = state.pop("apt_daily_on_stop")
         for name in args[1:]:
             unit = state["units"].setdefault(name, {})
             if cmd == "stop":

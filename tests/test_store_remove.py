@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +18,9 @@ from test_store_install import Conn  # noqa: E402
 from test_remove_runner import World, DEMO  # noqa: E402
 
 FAKE_BOX = "#!/bin/bash\necho \"box $*\"; sleep 30\n"  # a long installation, to be busy with
+# First line of a fake remove script. The uninstaller saves script_started before it starts Swizzin's script:
+# once this line is relayed, a Stop or a crash can no longer come before the script.
+RUNNING = 'echo "demo script running"\n'
 
 
 class Remove(unittest.TestCase):
@@ -52,10 +54,15 @@ class Remove(unittest.TestCase):
     def tearDown(self):
         for c in self.conns:
             c.close()
-        self.helper.stop()
-        subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
-        os.umask(self.w.umask)
-        shutil.rmtree(self.w.base, ignore_errors=True)
+        # A test that failed halfway leaves its removal running, and a helper that is told to stop waits for it (up
+        # to 5 s before the script, until the script ends after it): stop() would time out and hide the real error.
+        subprocess.run(["pkill", "-9", "-P", str(self.helper.proc.pid)], stderr=subprocess.DEVNULL)
+        try:
+            self.helper.stop()
+        finally:
+            subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
+            os.umask(self.w.umask)
+            shutil.rmtree(self.w.base, ignore_errors=True)
 
     def conn(self):
         c = Conn(self.helper.path)
@@ -81,6 +88,14 @@ class Remove(unittest.TestCase):
         c.send(op="remove", app=app, ticket=reply["ticket"], confirm=confirm or app.upper(), requester="admin at 10.0.0.2",
                **extra)
         return c, c.until(lambda m: "ok" in m)
+
+    def crash(self):
+        """The service crashes, then systemd kills the rest of it: the uninstaller and Swizzin's script, whose argv
+        hold this test's folder (its `sleep` dies of the SIGHUP the kernel sends when the script's bash dies).
+        Only this test's processes: another test run may have its own uninstaller of demo."""
+        self.helper.proc.kill()
+        subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
+        self.helper.proc.wait()
 
     def phases(self, c):
         seen = []
@@ -202,7 +217,9 @@ class Remove(unittest.TestCase):
         self.start("--test-env", "STORE_TEST_PAUSE=copy:3")
         c, started = self.remove()
         c.until(lambda m: m.get("phase") == "copy", timeout=30)
-        self.helper.stop()  # systemctl stop swizzin-store, or a reboot
+        # systemctl stop swizzin-store, or a reboot. stop() returns when the helper has put the app back and ended,
+        # which takes the rest of the 3-second pause and more: 5 s was no limit for a hung helper, only a deadline.
+        self.helper.stop(timeout=60)
         with open(glob.glob(os.path.join(self.logs, "*.json"))[0]) as f:
             summary = json.load(f)
         self.assertEqual(summary["result"], "failed")
@@ -211,10 +228,9 @@ class Remove(unittest.TestCase):
         self.start()
 
     def test_stopping_the_service_during_the_script_waits_for_its_end(self):
-        self.w.app("demo", "sleep 3\n" + DEMO, **self.w.apps["demo"])
+        self.w.app("demo", RUNNING + "sleep 3\n" + DEMO, **self.w.apps["demo"])
         c, started = self.remove()
-        c.until(lambda m: m.get("phase") == "remove", timeout=30)
-        time.sleep(1)
+        c.wait_output("demo script running", timeout=30)
         self.helper.stop(timeout=60)
         with open(glob.glob(os.path.join(self.logs, "*.json"))[0]) as f:
             summary = json.load(f)
@@ -227,9 +243,7 @@ class Remove(unittest.TestCase):
         self.start("--test-env", "STORE_TEST_PAUSE=copy:30")
         c, started = self.remove()
         c.until(lambda m: m.get("phase") == "copy", timeout=30)
-        self.helper.proc.kill()  # the service crashes...
-        subprocess.run(["pkill", "-9", "-f", "remove_runner.py --app demo"], stderr=subprocess.DEVNULL)  # ...systemd kills the rest
-        self.helper.proc.wait()
+        self.crash()
         self.assertEqual(self.w.load()["units"]["demo.service"]["active"], "inactive")  # left stopped by the crash
         self.start()
         last = self.catalogue()["last"]
@@ -239,14 +253,10 @@ class Remove(unittest.TestCase):
         self.assertEqual((state["active"], state["enabled"]), ("active", "enabled"))
 
     def test_a_crash_during_the_script_is_reported_incomplete(self):
-        self.w.app("demo", "sleep 30\n" + DEMO, **self.w.apps["demo"])
+        self.w.app("demo", RUNNING + "sleep 30\n" + DEMO, **self.w.apps["demo"])
         c, started = self.remove()
-        c.until(lambda m: m.get("phase") == "remove", timeout=30)
-        time.sleep(1)
-        self.helper.proc.kill()
-        subprocess.run(["pkill", "-9", "-f", self.w.base + "/work"], stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-9", "-f", "remove_runner.py --app demo"], stderr=subprocess.DEVNULL)
-        self.helper.proc.wait()
+        c.wait_output("demo script running", timeout=30)
+        self.crash()
         self.start()
         last = self.catalogue()["last"]
         self.assertEqual((last["action"], last["result"]), ("remove", "incomplete"))

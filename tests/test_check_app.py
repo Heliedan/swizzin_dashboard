@@ -104,14 +104,18 @@ class Check(unittest.TestCase):
     def test_a_slow_app_is_waited_for(self):
         self.service("emby-server.service", port="8096", pid=101)
         self.owner.pop(101)  # not listening yet
-        later = time.monotonic() + 1
-        with mock.patch.object(check_app, "cgroup_has", lambda pid, unit: time.monotonic() > later and int(pid) == 101):
-            t = time.monotonic()
+        pauses = []
+
+        def sleep(seconds):  # Emby is up once the check waits for it, however long the first look took
+            pauses.append(seconds)
+            self.owner[101] = "emby-server.service"
+        # check_app's own time only: subprocess sleeps too while it waits for the fake tools
+        with mock.patch.object(check_app, "time", mock.Mock(monotonic=time.monotonic, sleep=sleep)):
             code, out = self.check("emby", "--wait", "20")
         self.assertEqual(code, 0)
         self.assertIn("Waiting for Emby to start (20 seconds at most)...", out)
         self.assertIn("✓ It is listening on port 8096", out)
-        self.assertLess(time.monotonic() - t, 10)  # stops waiting as soon as it is up
+        self.assertEqual(pauses, [2])  # stops waiting as soon as it is up
 
     def test_waiting_has_an_end(self):
         self.service("medusa.service")
