@@ -174,6 +174,11 @@ class Remove(unittest.TestCase):
         self.assertTrue(c.until(lambda m: "ok" in m)["ok"])
         c.send(op="remove-preview", app="demo")
         self.assertEqual(c.until(lambda m: "error" in m)["error"], "busy")
+        # Ended here, while the helper can still reap it. Left to tearDown, the fake box outlives the helper and
+        # waits as a zombie named "box" until PID 1 collects it, which some containers do late or never:
+        # the next removal would then refuse with "box is running".
+        subprocess.run(["pkill", "-9", "-P", str(self.helper.proc.pid), "-x", "box"], stderr=subprocess.DEVNULL)
+        c.until(lambda m: "done" in m)
 
     def test_an_incomplete_removal_can_be_tried_again(self):
         broken = 'rm "$STORE_TEST_ROOT/install/.demo.lock"; echo "E: halfway"; exit 1\n'  # leaves its files behind

@@ -461,6 +461,8 @@ class Pieces(unittest.TestCase):
     def test_a_link_owned_by_a_user_on_the_way_is_refused(self):
         os.rename(self.w.path("/home/bob/.config"), self.w.path("/home/bob/config-real"))
         os.symlink(self.w.path("/home/bob/config-real"), self.w.path("/home/bob/.config"))
+        if os.geteuid() == 0:  # tests run as root: the link was made by root, give it to a user as on a real server
+            os.lchown(self.w.path("/home/bob/.config"), 1000, 1000)
         with mock.patch("os.geteuid", return_value=0):  # as root: a link of user 1000 is not trusted
             self.assertIn("is a link that does not belong to root",
                           self.r.safe_path("/home/bob/.config/demo/settings.json"))
