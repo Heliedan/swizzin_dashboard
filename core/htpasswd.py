@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Decorator, configuration, and error handler for basic and token
+Decorator, configuration, and error handler for basic
 authentication using htpasswd files
 """
 from __future__ import absolute_import, unicode_literals
@@ -15,8 +15,6 @@ import os
 import time
 
 from flask import request, Response, current_app, g, abort, make_response
-from itsdangerous import BadSignature
-from authlib.jose import JsonWebSignature as Serializer
 from passlib.apache import HtpasswdFile
 
 
@@ -102,7 +100,7 @@ class FailedLogins:
 
 
 class HtPasswdAuth:
-    """Configure htpasswd based basic and token authentication."""
+    """Configure htpasswd based basic authentication."""
 
     def __init__(self, app=None):
         """Boiler plate extension init with log_level being declared"""
@@ -190,63 +188,6 @@ class HtPasswdAuth:
         )
 
     @staticmethod
-    def get_signature():
-        """
-        Setup crypto sig.
-        """
-        return Serializer.serialize(current_app.config['FLASK_SECRET'])
-
-    def get_hashhash(self, username):
-        """
-        Generate a digest of the htpasswd hash
-        """
-        return hashlib.sha256(
-            self.users.get_hash(username)
-        ).hexdigest()
-
-    def generate_token(self, username):
-        """
-        assumes user exists in htpasswd file.
-
-        Return the token for the given user by signing a token of
-        the username and a hash of the htpasswd string.
-        """
-        serializer = self.get_signature()
-        return serializer.dumps(
-            {
-                'username': username,
-                'hashhash': self.get_hashhash(username)
-            }
-        ).decode('UTF-8')
-
-    def check_token_auth(self, token):
-        """
-        Check to see who this is and if their token gets
-        them into the system.
-        """
-        serializer = self.get_signature()
-
-        try:
-            data = serializer.loads(token)
-        except BadSignature:
-            log.warning('Received bad token signature')
-            return False, None
-        if data['username'] not in self.users.users():
-            log.warning(
-                'Token auth signed message, but invalid user %s',
-                data['username']
-            )
-            return False, None
-        if data['hashhash'] != self.get_hashhash(data['username']):
-            log.warning(
-                'Token and password do not match, %s '
-                'needs to regenerate token',
-                data['username']
-            )
-            return False, None
-        return True, data['username']
-
-    @staticmethod
     def auth_failed():
         """
         Sends a 401 response that enables basic auth
@@ -284,31 +225,13 @@ class HtPasswdAuth:
         is_valid = False
         user = None
         credentials = None
-        # Werkzeug also parses other schemes ("token ...", "Bearer ..."): only Basic carries a password
+        # Werkzeug also parses other schemes ("token ...", "Bearer ..."): only Basic carries a password, and the
+        # panel has no other login (token logins were removed: broken since 2022, nothing could make a token)
         if basic_auth and getattr(basic_auth, "type", "basic") == "basic":
             credentials = ['basic', basic_auth.username, basic_auth.password]
             is_valid, user = self.check_basic_auth(
                 basic_auth.username, basic_auth.password
             )
-        else:  # Try token auth
-            token = request.headers.get('Authorization', None)
-            param_token = request.args.get('access_token')
-            if token or param_token:
-                if token:
-                    # slice the 'token ' piece of the header (following
-                    # github style):
-                    token = token[6:]
-                else:
-                    # Grab it from query dict instead
-                    token = param_token
-                log.debug('Received token: %s', token)
-
-                credentials = ['token', token]
-                try:
-                    is_valid, user = self.check_token_auth(token)
-                except Exception:  # a broken token check must refuse, never fail open or crash the caller
-                    log.warning('Token authentication failed', exc_info=True)
-                    is_valid, user = False, None
         if credentials and not is_valid and self.failed_logins.failed(address, credentials):
             log.warning('Too many failed logins from %s: refused for %d minutes',
                         address, math.ceil(self.failed_logins.block_time / 60))
@@ -316,7 +239,7 @@ class HtPasswdAuth:
 
     def required(self, func):
         """
-        Decorator function with basic and token authentication handler
+        Decorator function with basic authentication handler
         """
         @wraps(func)
         def decorated(*args, **kwargs):

@@ -73,6 +73,20 @@ class LoginLimit(unittest.TestCase):
             self.get(f"wrong-{i}")
         self.assertEqual(self.get("right").status_code, 200)
 
+    def test_token_logins_are_refused_and_not_counted(self):
+        """The panel has no token login: such requests are refused like anonymous ones, without counting."""
+        attempts = [{"Authorization": f"{scheme} abc{i}"} for scheme in ("token", "Bearer") for i in range(5)]
+        with mock.patch.object(swizzin.limiter, "enabled", False):  # Flask-Limiter caps anonymous requests
+            for headers in attempts:
+                headers.update({"X-Forwarded-For": CLIENT, "X-Requested-With": "XMLHttpRequest"})
+                r = self.client.get("/stats/loadavg", headers=headers, environ_base={"REMOTE_ADDR": "127.0.0.1"})
+                self.assertEqual(r.status_code, 401, headers["Authorization"])
+            for i in range(5):
+                r = self.client.get("/stats/loadavg?access_token=abc%d" % i, environ_base={"REMOTE_ADDR": "127.0.0.1"},
+                                    headers={"X-Forwarded-For": CLIENT, "X-Requested-With": "XMLHttpRequest"})
+                self.assertEqual(r.status_code, 401)
+        self.assertEqual(self.get("right").status_code, 200)  # 15 different "tokens", and the address is not blocked
+
     def test_different_wrong_passwords_block_the_address(self):
         """Then even the right password is refused, without being checked."""
         self.block()
