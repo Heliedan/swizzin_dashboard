@@ -54,10 +54,15 @@ class Remove(unittest.TestCase):
     def tearDown(self):
         for c in self.conns:
             c.close()
-        self.helper.stop()
-        subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
-        os.umask(self.w.umask)
-        shutil.rmtree(self.w.base, ignore_errors=True)
+        # A test that failed halfway leaves its removal running, and a helper that is told to stop waits for it (up
+        # to 5 s before the script, until the script ends after it): stop() would time out and hide the real error.
+        subprocess.run(["pkill", "-9", "-P", str(self.helper.proc.pid)], stderr=subprocess.DEVNULL)
+        try:
+            self.helper.stop()
+        finally:
+            subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
+            os.umask(self.w.umask)
+            shutil.rmtree(self.w.base, ignore_errors=True)
 
     def conn(self):
         c = Conn(self.helper.path)
