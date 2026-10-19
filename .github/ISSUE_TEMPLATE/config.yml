@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Problem with Swizzin itself
+    url: https://github.com/swizzin/swizzin/issues
+    about: Swizzin's install or remove scripts, or the box command. Please report these to Swizzin.
+  - name: Security problem
+    url: https://github.com/Heliedan/swizzin_dashboard/security/advisories/new
+    about: Never in a public issue. This opens a private report.

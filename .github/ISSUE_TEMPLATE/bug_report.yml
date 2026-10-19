@@ -1,0 +1,63 @@
+name: Bug report
+description: Something does not work in this edition (the panel, the App Store, heliedan.sh).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before posting, remove passwords, domain names, IP addresses and tokens** from everything you paste here.
+
+        A problem with Swizzin itself (its install or remove scripts, `box`) goes to https://github.com/swizzin/swizzin/issues instead.
+        A security problem never goes in a public issue: use the **Report a vulnerability** button in the **Security** tab.
+  - type: input
+    id: edition
+    attributes:
+      label: Edition version
+      description: The release (for example heliedan-2.0), or the commit shown by `sudo bash heliedan.sh status`.
+      placeholder: heliedan-2.0
+    validations:
+      required: true
+  - type: input
+    id: ubuntu
+    attributes:
+      label: Ubuntu version
+      description: For example 24.04. `lsb_release -d` shows it.
+      placeholder: "24.04"
+    validations:
+      required: true
+  - type: input
+    id: swizzin
+    attributes:
+      label: Swizzin version or commit (if you know it)
+      description: "`sudo git -C /etc/swizzin log -1 --format='%h %cs'` shows the commit and its date."
+    validations:
+      required: false
+  - type: textarea
+    id: what-you-did
+    attributes:
+      label: What you did
+      description: The steps, one per line.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant lines from the App Store terminal or the service's journal
+      description: |
+        Only the lines around the problem. The journal: `sudo journalctl -u swizzin-store`.
+        Remove passwords, domain names, IP addresses and tokens first.
+      render: shell
+    validations:
+      required: false
