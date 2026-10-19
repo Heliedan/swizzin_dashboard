@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +18,9 @@ from test_store_install import Conn  # noqa: E402
 from test_remove_runner import World, DEMO  # noqa: E402
 
 FAKE_BOX = "#!/bin/bash\necho \"box $*\"; sleep 30\n"  # a long installation, to be busy with
+# First line of a fake remove script. The uninstaller saves script_started before it starts Swizzin's script:
+# once this line is relayed, a Stop or a crash can no longer come before the script.
+RUNNING = 'echo "demo script running"\n'
 
 
 class Remove(unittest.TestCase):
@@ -211,10 +213,9 @@ class Remove(unittest.TestCase):
         self.start()
 
     def test_stopping_the_service_during_the_script_waits_for_its_end(self):
-        self.w.app("demo", "sleep 3\n" + DEMO, **self.w.apps["demo"])
+        self.w.app("demo", RUNNING + "sleep 3\n" + DEMO, **self.w.apps["demo"])
         c, started = self.remove()
-        c.until(lambda m: m.get("phase") == "remove", timeout=30)
-        time.sleep(1)
+        c.wait_output("demo script running", timeout=30)
         self.helper.stop(timeout=60)
         with open(glob.glob(os.path.join(self.logs, "*.json"))[0]) as f:
             summary = json.load(f)
@@ -239,10 +240,9 @@ class Remove(unittest.TestCase):
         self.assertEqual((state["active"], state["enabled"]), ("active", "enabled"))
 
     def test_a_crash_during_the_script_is_reported_incomplete(self):
-        self.w.app("demo", "sleep 30\n" + DEMO, **self.w.apps["demo"])
+        self.w.app("demo", RUNNING + "sleep 30\n" + DEMO, **self.w.apps["demo"])
         c, started = self.remove()
-        c.until(lambda m: m.get("phase") == "remove", timeout=30)
-        time.sleep(1)
+        c.wait_output("demo script running", timeout=30)
         self.helper.proc.kill()
         subprocess.run(["pkill", "-9", "-f", self.w.base + "/work"], stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-9", "-f", "remove_runner.py --app demo"], stderr=subprocess.DEVNULL)
