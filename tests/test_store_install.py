@@ -444,5 +444,24 @@ class Install(unittest.TestCase):
         self.assertEqual(last["action"], "install")  # a summary saved before actions existed
 
 
+class JobNames(unittest.TestCase):
+    def test_two_jobs_in_the_same_second_have_their_own_files(self):
+        sys.path.insert(0, os.path.join(ROOT, "store-helper"))
+        import swizzin_store
+        from unittest import mock
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base)
+        opts = swizzin_store.options(["--logs", base, "--tests", base])
+        jobs = []
+        for now in (1760000000.25, 1760000000.75, 1760000001.0):  # a failure, Try again in the same second, later
+            with mock.patch.object(swizzin_store.time, "time", return_value=now):
+                jobs.append(swizzin_store.Job(opts, "demo", 0, action="remove"))
+            jobs[-1].log.close()
+        ids = [job.id for job in jobs]
+        self.assertEqual(ids, sorted(set(ids)))  # all different, and in the order they started
+        self.assertEqual(len(glob.glob(os.path.join(base, "*.log"))), 3)
+        self.assertEqual(len({job.state_path for job in jobs} | {job.result_path for job in jobs}), 6)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

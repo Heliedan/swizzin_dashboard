@@ -506,9 +506,17 @@ class Removal:
         if not present:
             say("Nothing to copy: %s keeps no settings of yours that its removal deletes." % self.app)
             return
-        name = "%s-%s.tar.gz" % (self.app, time.strftime("%Y%m%d-%H%M%S"))
-        path = os.path.join(self.opts.archives, name)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        for n in range(1, 100):  # copies are never deleted: one made in the same second keeps its name
+            name = "%s-%s%s.tar.gz" % (self.app, stamp, "-%d" % n if n > 1 else "")
+            path = os.path.join(self.opts.archives, name)
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise Refused("no free name for the copy of its settings in %s" % self.opts.archives)
         self.archive = path
         self.save_state()
         manifest = []

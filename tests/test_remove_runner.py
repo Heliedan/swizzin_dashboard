@@ -208,6 +208,22 @@ class Runner(unittest.TestCase):
         self.assertIn("1/5", self.w.output)
         self.assertIn("5/5", self.w.output)
 
+    def test_a_copy_made_in_the_same_second_keeps_the_other_one(self):
+        os.makedirs(self.w.archives, mode=0o700)
+        now = time.time()
+        taken = ["demo-%s.tar.gz" % time.strftime("%Y%m%d-%H%M%S", time.localtime(now + s)) for s in range(30)]
+        for name in taken:  # every name the run can pick in the next 30 seconds is already a copy
+            with open(os.path.join(self.w.archives, name), "w") as f:
+                f.write("an older copy")
+        result = self.w.run()
+        self.assertEqual(result["result"], "removed", self.w.output)
+        self.assertRegex(os.path.basename(result["archive"]), r"^demo-\d{8}-\d{6}-2\.tar\.gz$")
+        self.assertIn(os.path.basename(result["archive"])[:-len("-2.tar.gz")] + ".tar.gz", taken)
+        self.assertIn("home/alice/.config/demo/config.toml", self.w.members(result["archive"]))
+        for name in taken:
+            with open(os.path.join(self.w.archives, name)) as f:
+                self.assertEqual(f.read(), "an older copy")
+
     def test_traps_in_the_copied_folders_are_not_followed(self):
         os.symlink("/etc/passwd", self.w.path("/home/alice/.config/demo/passwd"))  # planted by a user
         os.symlink("/etc", self.w.path("/home/alice/.config/demo/etc"))
