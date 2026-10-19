@@ -5,8 +5,9 @@ Installed under those names in a folder put first in PATH. They share a JSON sta
 the fake root $STORE_TEST_ROOT) and note every call in fake-calls.log, so that the tests can check what was run.
 State: {"units": {name: {"active", "enabled", "user", "file" (path of its unit file under the fake root),
 "package"}}, "packages": {name: status}, "rdeps": {package: [packages removed along]}, "apt_check": code,
-"audit": text, "nginx_ok": bool, "apt_daily": state, "sim_extra": [lines added to apt-get -s],
-"listening": [ports], "listening_pids": [[port, pid]], "listening_cgroups": [[port, cgroup]]}.
+"audit": text, "nginx_ok": bool, "apt_daily": state, "apt_daily_on_stop": the apt_daily that the next systemctl stop
+sets, "sim_extra": [lines added to apt-get -s], "listening": [ports], "listening_pids": [[port, pid]],
+"listening_cgroups": [[port, cgroup]]}.
 """
 import fcntl
 import fnmatch
@@ -78,6 +79,8 @@ def systemctl(state, args):
                 print("%s loaded %s running fake" % (name, state["units"][name].get("active", "inactive")))
         return 0
     if cmd in ("stop", "start", "enable", "disable"):
+        if cmd == "stop" and "apt_daily_on_stop" in state:  # the automatic updates start meanwhile
+            state["apt_daily"] = state.pop("apt_daily_on_stop")
         for name in args[1:]:
             unit = state["units"].setdefault(name, {})
             if cmd == "stop":

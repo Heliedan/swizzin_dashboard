@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import json
 import os
+import select
 import shutil
 import signal
 import stat
@@ -104,8 +105,10 @@ class World:
         return os.path.join(self.root, path.lstrip("/"))
 
     def save(self):
-        with open(os.path.join(self.base, "fake-state.json"), "w") as f:
+        path = os.path.join(self.base, "fake-state.json")
+        with open(path + ".test", "w") as f:  # written aside, then renamed: a fake tool never reads half a file
             json.dump(self.state, f)
+        os.replace(path + ".test", path)
 
     def load(self):
         with open(os.path.join(self.base, "fake-state.json")) as f:
@@ -148,6 +151,27 @@ class World:
     def start(self, app="demo", *extra, **env):
         return subprocess.Popen(self.argv(app, *extra), env=self.env(**env), stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    @staticmethod
+    def wait_output(p, text, timeout=60):
+        """What a started runner printed, read as it comes, up to text (p.communicate() gives the rest)."""
+        out, end = b"", time.monotonic() + timeout
+        while text.encode() not in out:
+            ready = select.select([p.stdout], [], [], max(end - time.monotonic(), 0))[0]
+            chunk = os.read(p.stdout.fileno(), 65536) if ready else b""
+            if not chunk:
+                raise AssertionError("%r never came; output: %s" % (text, out.decode("utf-8", "replace")))
+            out += chunk
+        return out
+
+    @staticmethod
+    def wait_for(p, test, timeout=60):
+        """Until test() is true, while the started runner still runs."""
+        end = time.monotonic() + timeout
+        while not test():
+            if p.poll() is not None or time.monotonic() > end:
+                raise AssertionError("the runner ended or took too long (code %s)" % p.poll())
+            time.sleep(0.05)
 
     def result(self):
         with open(os.path.join(self.base, "result.json")) as f:
@@ -262,35 +286,36 @@ class Runner(unittest.TestCase):
         self.w.save()
         self.assertIn("automatic system updates", self.w.run()["message"])
 
-    def wait_phase(self, phase):
-        for _ in range(200):
-            if os.path.exists(os.path.join(self.w.base, "state.json")) and \
-                    json.load(open(os.path.join(self.w.base, "state.json")))["phase"] == phase:
-                return
-            time.sleep(0.05)
-        self.fail("never reached " + phase)
-
     def apt_daily(self, value):
         state = self.w.load()
         state["apt_daily"] = value
         self.w.save()
 
+    def apt_daily_on_stop(self, value):
+        """The automatic updates start when the app is stopped: after the first apt check, before the wait for apt
+        (Ubuntu starts them on its own, at any time)."""
+        self.w.state["apt_daily_on_stop"] = value
+        self.w.save()
+
+    def apt_checks(self):
+        return self.w.calls().count("systemctl is-active apt-daily.service")
+
     def test_apt_busy_after_the_copy_is_waited_for(self):
-        p = self.w.start("demo", "--apt-wait", "30", STORE_TEST_PAUSE="copy:1")
-        self.wait_phase("copy")
-        self.apt_daily("activating")  # the automatic updates start meanwhile (Ubuntu does it on its own)
-        time.sleep(4)
+        self.apt_daily_on_stop("activating")
+        p = self.w.start("demo", "--apt-wait", "30")
+        out = self.w.wait_output(p, "Waiting for apt to be free")
+        checks = self.apt_checks()
+        self.w.wait_for(p, lambda: self.apt_checks() > checks)  # checked again, still busy
         self.assertIsNone(p.poll())  # waiting, nothing removed yet
         self.assertTrue(os.path.exists(self.w.path("/home/alice/.config/demo/config.toml")))
         self.apt_daily("inactive")
-        out = p.communicate(timeout=60)[0].decode()
+        out = (out + p.communicate(timeout=60)[0]).decode()
         self.assertIn("Waiting for apt to be free (automatic system updates", out)
         self.assertEqual(self.w.result()["result"], "removed", out)
 
     def test_apt_busy_too_long_after_the_copy_puts_everything_back(self):
-        p = self.w.start("demo", "--apt-wait", "3", STORE_TEST_PAUSE="copy:1")
-        self.wait_phase("copy")
-        self.apt_daily("activating")
+        self.apt_daily_on_stop("activating")
+        p = self.w.start("demo", "--apt-wait", "3")
         out = p.communicate(timeout=60)[0].decode()
         result = self.w.result()
         self.assertEqual(result["result"], "failed", out)
@@ -300,12 +325,11 @@ class Runner(unittest.TestCase):
         self.assertTrue(os.path.exists(self.w.path("/home/alice/.config/demo/config.toml")))
 
     def test_stop_while_waiting_for_apt_puts_everything_back(self):
-        p = self.w.start("demo", "--apt-wait", "60", STORE_TEST_PAUSE="copy:1")
-        self.wait_phase("copy")
-        self.apt_daily("activating")
-        time.sleep(3)
+        self.apt_daily_on_stop("activating")
+        p = self.w.start("demo", "--apt-wait", "60")
+        out = self.w.wait_output(p, "Waiting for apt to be free")
         p.send_signal(signal.SIGINT)  # the page's Stop
-        out = p.communicate(timeout=60)[0].decode()
+        out = (out + p.communicate(timeout=60)[0]).decode()
         result = self.w.result()
         self.assertEqual(result["result"], "failed", out)
         self.assertIn("stopped at your request", result["message"])
