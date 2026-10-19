@@ -220,7 +220,9 @@ class Job:
     def __init__(self, opts, app, size, action="install"):
         self.app = app
         self.action = action  # install or remove: the page words its messages after it
-        self.id = time.strftime("%Y%m%d-%H%M%S") + "-" + app
+        # unique even for two jobs in the same second (Try again right after a failure), and sorted by time
+        now = time.time()
+        self.id = "%s-%06d-%s" % (time.strftime("%Y%m%d-%H%M%S", time.localtime(now)), now % 1 * 1000000, app)
         self.key = secrets.token_urlsafe(24)
         # install, then test, then done; or the uninstaller's steps (REMOVE_PHASES), then done
         self.phase = "install" if action == "install" else "check"
