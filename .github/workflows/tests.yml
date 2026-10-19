@@ -1,7 +1,10 @@
 name: Tests
 
+# Pull requests, and what reaches heliedan: a push to another branch is
+# tested through its pull request, not twice.
 on:
   push:
+    branches: [heliedan]
   pull_request:
 
 permissions:
