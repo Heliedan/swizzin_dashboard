@@ -413,17 +413,10 @@ class Runner(unittest.TestCase):
         self.assertIn("Stopping is not possible now", out)
 
     def test_an_app_started_again_meanwhile_is_put_back(self):
-        p = self.w.start(STORE_TEST_PAUSE="remove:2")
-        for _ in range(100):
-            if os.path.exists(os.path.join(self.w.base, "state.json")) and \
-                    json.load(open(os.path.join(self.w.base, "state.json")))["phase"] == "remove":
-                break
-            time.sleep(0.1)
-        state = self.w.load()
-        state["units"]["demo.service"]["active"] = "active"  # someone started it from the panel's switch
+        # someone starts it from the panel's switch, after it was stopped, just before Swizzin's script
+        self.w.state["active_in_phase"] = {"demo.service": "remove"}
         self.w.save()
-        p.communicate(timeout=60)
-        result = self.w.result()
+        result = self.w.run()
         self.assertEqual(result["result"], "failed")
         self.assertIn("started again", result["message"])
         self.assertTrue(os.path.exists(result["archive"]))  # the checked copy stays: it can only help
