@@ -89,6 +89,14 @@ class Remove(unittest.TestCase):
                **extra)
         return c, c.until(lambda m: "ok" in m)
 
+    def crash(self):
+        """The service crashes, then systemd kills the rest of it: the uninstaller and Swizzin's script, whose argv
+        hold this test's folder (its `sleep` dies of the SIGHUP the kernel sends when the script's bash dies).
+        Only this test's processes: another test run may have its own uninstaller of demo."""
+        self.helper.proc.kill()
+        subprocess.run(["pkill", "-9", "-f", self.w.base], stderr=subprocess.DEVNULL)
+        self.helper.proc.wait()
+
     def phases(self, c):
         seen = []
         done = c.until(lambda m: seen.append(m["phase"]) if "phase" in m else "done" in m, timeout=60)["done"]
@@ -233,9 +241,7 @@ class Remove(unittest.TestCase):
         self.start("--test-env", "STORE_TEST_PAUSE=copy:30")
         c, started = self.remove()
         c.until(lambda m: m.get("phase") == "copy", timeout=30)
-        self.helper.proc.kill()  # the service crashes...
-        subprocess.run(["pkill", "-9", "-f", "remove_runner.py --app demo"], stderr=subprocess.DEVNULL)  # ...systemd kills the rest
-        self.helper.proc.wait()
+        self.crash()
         self.assertEqual(self.w.load()["units"]["demo.service"]["active"], "inactive")  # left stopped by the crash
         self.start()
         last = self.catalogue()["last"]
@@ -248,10 +254,7 @@ class Remove(unittest.TestCase):
         self.w.app("demo", RUNNING + "sleep 30\n" + DEMO, **self.w.apps["demo"])
         c, started = self.remove()
         c.wait_output("demo script running", timeout=30)
-        self.helper.proc.kill()
-        subprocess.run(["pkill", "-9", "-f", self.w.base + "/work"], stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-9", "-f", "remove_runner.py --app demo"], stderr=subprocess.DEVNULL)
-        self.helper.proc.wait()
+        self.crash()
         self.start()
         last = self.catalogue()["last"]
         self.assertEqual((last["action"], last["result"]), ("remove", "incomplete"))
