@@ -26,6 +26,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
 
 import swizzin  # noqa: E402  (first: it runs eventlet.monkey_patch())
 import flask  # noqa: E402
+import core.util as util  # noqa: E402
 from core.custom import store  # noqa: E402
 from test_store_helper import Helper, fake_swizzin  # noqa: E402
 
@@ -57,6 +58,11 @@ class StorePage(unittest.TestCase):
 
     def setUp(self):
         self.client = swizzin.app.test_client()
+        # The sidebar lists the apps of the real server (/install): not what these tests are about.
+        for module in (util, swizzin):  # swizzin.py has its own name for it (from core.util import *)
+            patcher = mock.patch.object(module, "generate_page_list", return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def page(self, user="tester"):
         r = self.client.get("/apps", headers=auth(user))

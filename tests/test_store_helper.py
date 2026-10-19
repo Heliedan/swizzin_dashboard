@@ -44,7 +44,7 @@ class Helper:
         self.proc = subprocess.Popen(
             [sys.executable, "-I", "-B", HELPER, "--socket", self.path, "--scripts", os.path.join(base, "scripts"),
              "--lang", os.path.join(base, "lang_en"), "--locks", os.path.join(base, "locks"),
-             "--allow-uid", str(uid), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
+             "--allow-uid", str(uid), "--logs", os.path.join(base, "logs"), *extra], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
             preexec_fn=lambda: self._limits(ignore_sigint, max_file_size))
         for _ in range(100):
             if os.path.exists(self.path):
