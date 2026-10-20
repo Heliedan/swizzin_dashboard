@@ -34,6 +34,8 @@ CPU_A = {"cpu": [1, 0, 1, 10, 0, 0, 0, 0], "cpu0": [1, 0, 1, 10, 0, 0, 0, 0]}
 CPU_B = {"cpu": [2, 0, 2, 20, 0, 0, 0, 0], "cpu0": [2, 0, 2, 20, 0, 0, 0, 0]}
 ZFS, NFS = "/tank/media", "/mnt/nas"
 TANK = ("1.00 TiB", "972.80 GiB", "51.20 GiB", "95.00")
+NAS = ("100.00 GiB", "10.00 GiB", "90.00 GiB", "10.00")
+REAL_SLEEP = live_stats.original("time").sleep  # blocks the system thread that calls it, as a slow disk does
 
 
 def fake_open(proc_mounts, fstab=""):
@@ -88,17 +90,22 @@ class DiskRobustness(unittest.TestCase):
 
 class DeadShare:
     """disk_usage() of the panel, where NFS is a network share that stopped answering: reading it blocks the system
-    thread that asks, as statvfs() does, until answer() (or 10 s, so that a broken test cannot hang)."""
+    thread that asks, as statvfs() does, until answer() (or 10 s, so that a broken test cannot hang).
+    answers: readings of NFS answered before it stops answering. slow: seconds each reading of ZFS takes."""
 
     def __init__(self):
         self.calls = []
+        self.answers = 0
+        self.slow = 0
         self.answered = live_stats.original("threading").Event()  # a real one: it blocks a real thread
 
     def __call__(self, mnt):
         self.calls.append(mnt)
         if mnt == NFS:
-            self.answered.wait(10)
-            return "100.00 GiB", "10.00 GiB", "90.00 GiB", "10.00"
+            if self.calls.count(NFS) > self.answers:
+                self.answered.wait(10)
+            return NAS
+        REAL_SLEEP(self.slow)
         return TANK
 
     def answer(self):
@@ -151,7 +158,22 @@ class WithoutDevDevice(unittest.TestCase):
         end = time.monotonic() + 5
         while sonde.releve([NFS])[NFS] is None and time.monotonic() < end:
             time.sleep(0.01)
-        self.assertEqual(sonde.releve([NFS])[NFS], ("100.00 GiB", "10.00 GiB", "90.00 GiB", "10.00"))
+        self.assertEqual(sonde.releve([NFS])[NFS], NAS)
+
+    def test_a_share_that_stops_answering_shows_its_last_answer_then_is_unavailable(self):
+        """The live cards show its last answer meanwhile, never one older than the delay."""
+        self.share.answers = 1
+        sonde = live_stats.Sonde(delai=0.5)
+        self.assertEqual(sonde.releve([NFS], attendre=True), {NFS: NAS})  # it answers once
+        start = time.monotonic()
+        self.assertEqual(sonde.releve([NFS]), {NFS: NAS})  # its next reading blocks: the last answer, at once
+        self.assertLess(time.monotonic() - start, 0.1)
+        while time.monotonic() - start < 0.6:
+            time.sleep(0.01)
+        self.assertEqual(sonde.releve([NFS]), {NFS: None})  # silent for longer than the delay
+        self.assertEqual(sonde.releve([NFS], attendre=True), {NFS: None})  # /stats/disk does not wait for it again
+        self.assertLess(time.monotonic() - start, 1)
+        self.assertEqual(self.share.calls.count(NFS), 2)
 
     def test_an_unreadable_mount_is_unavailable(self):
         sonde = live_stats.Sonde(delai=5)
@@ -178,7 +200,8 @@ class WithoutDevDevice(unittest.TestCase):
 
         sio = FakeSocketIO()
         start = time.monotonic()
-        with mock.patch.object(live_stats, "SONDE", live_stats.Sonde(delai=0.25)), \
+        # A delay longer than the five readings: a loop that waited for the share would take 2 s or more.
+        with mock.patch.object(live_stats, "SONDE", live_stats.Sonde(delai=2)), \
                 mock.patch.object(live_stats, "peripheriques", return_value={"/": "sda1", ZFS: None, NFS: None}), \
                 mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
                 mock.patch.object(live_stats, "_cpu", return_value=CPU_A), \
@@ -192,6 +215,8 @@ class WithoutDevDevice(unittest.TestCase):
         self.assertEqual(self.share.calls.count(NFS), 1)
 
     def test_the_stats_route_leaves_a_dead_share_out_in_a_few_seconds(self):
+        """It waits for the answers (ZFS takes 0.1 s here), and for the dead share until the delay only."""
+        self.share.slow = 0.1
         client = swizzin.app.test_client()
         start = time.monotonic()
         with mock.patch.object(swizzin, "SONDE", live_stats.Sonde(delai=0.3)), \
@@ -199,6 +224,7 @@ class WithoutDevDevice(unittest.TestCase):
                 mock.patch.object(swizzin, "peripheriques", return_value={"/": "sda1", ZFS: None, NFS: None}), \
                 self.assertLogs(swizzin.app.logger, "WARNING") as log:
             r = client.get("/stats/disk", headers=AUTH)
+        self.assertGreaterEqual(time.monotonic() - start, 0.3)
         self.assertLess(time.monotonic() - start, 2)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(sorted(r.get_json()), ["/", ZFS])
