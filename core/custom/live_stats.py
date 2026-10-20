@@ -2,13 +2,51 @@
 
 Ajouté le 2026-10-09 (cartes CPU Info, RAM Info et Disk Info actualisées à la seconde).
 Ce fichier est dans core/custom/ : la mise à jour du panel le conserve. Voir le README (Live cards).
-Charge moyenne et top des programmes retirés le 2026-10-09 : plus aucun relevé des processus."""
+Charge moyenne et top des programmes retirés le 2026-10-09 : plus aucun relevé des processus.
+Alerte « disque bientôt plein » ajoutée le 2026-10-20 : niveau calculé ici pour chaque disque, bandeau affiché
+par static/js/live_stats.js. Seuils DISK_WARN_PERCENT et DISK_CRIT_PERCENT dans swizzin.cfg."""
 import os
 import time
 import core.util as util  # import du module seulement : core.util et swizzin.py s'importent mutuellement au démarrage
 
 
 RELIRE_DISQUES = 30  # secondes entre deux relectures de la liste des disques
+SEUILS_DEFAUT = (90, 95)  # % d'occupation : avertissement (orange) puis critique (rouge), réglables dans swizzin.cfg
+
+
+def lire_seuils(config, journal=None):
+    """(avertissement, critique) en % depuis swizzin.cfg (DISK_WARN_PERCENT, DISK_CRIT_PERCENT).
+
+    0 coupe ce niveau d'alerte. Une valeur invalide (texte, négative, plus de 100...) reprend le défaut,
+    avec un avertissement dans le journal : un réglage mal écrit ne doit pas empêcher le panel de démarrer."""
+    out = []
+    for cle, defaut in zip(('DISK_WARN_PERCENT', 'DISK_CRIT_PERCENT'), SEUILS_DEFAUT):
+        valeur = config.get(cle, defaut)
+        try:
+            if isinstance(valeur, bool):  # True vaudrait 1 %
+                raise ValueError(valeur)
+            seuil = float(valeur)
+            if not 0 <= seuil <= 100:  # écarte aussi nan et inf
+                raise ValueError(valeur)
+        except (TypeError, ValueError, OverflowError):  # OverflowError : un entier trop grand pour float()
+            if journal is not None:
+                journal.warning("swizzin.cfg : %s = %r invalide (attendu : 0 à 100), %s utilisé",
+                                cle, valeur, defaut)
+            seuil = defaut
+        out.append(seuil)
+    return tuple(out)
+
+
+def niveau_alerte(pct, seuils):
+    """'critical', 'warning' ou None pour un disque occupé à `pct` %.
+
+    Un seuil à 0 est coupé. Si les deux seuils sont atteints, le critique l'emporte."""
+    avertissement, critique = seuils
+    if critique and pct >= critique:
+        return "critical"
+    if avertissement and pct >= avertissement:
+        return "warning"
+    return None
 
 
 def _cpu():
@@ -86,8 +124,11 @@ def _modele():
     return nom, ('{0:.2f} GHz'.format(mhz / 1000) if mhz else "")
 
 
-def mesure(avant, apres, duree, modele, freq, devs):
-    """Contenu de l'événement « live » à partir de deux relevés (cpu, disques) espacés de `duree` secondes."""
+def mesure(avant, apres, duree, modele, freq, devs, seuils=SEUILS_DEFAUT):
+    """Contenu de l'événement « live » à partir de deux relevés (cpu, disques) espacés de `duree` secondes.
+
+    Chaque disque lisible porte son niveau d'alerte (« alert ») selon `seuils`,
+    pour le bandeau « disque bientôt plein »."""
     (cpu_a, disq_a), (cpu_b, disq_b) = avant, apres
     total, _ = _repartition(cpu_a['cpu'], cpu_b['cpu'])
     coeurs = sorted((k for k in cpu_b if k != 'cpu'), key=lambda k: int(k[3:]))
@@ -105,7 +146,8 @@ def mesure(avant, apres, duree, modele, freq, devs):
         lu, ecrit = (b - a for a, b in zip(disq_a.get(dev, (0, 0)), disq_b.get(dev, (0, 0))))
         disques[mnt] = {"disktotal": taille, "diskused": utilise, "diskfree": libre, "perutil": pct,
                         "read": util.GetHumanReadableBi(lu * 512 / duree) + "/s",
-                        "write": util.GetHumanReadableBi(ecrit * 512 / duree) + "/s"}
+                        "write": util.GetHumanReadableBi(ecrit * 512 / duree) + "/s",
+                        "alert": niveau_alerte(float(pct), seuils)}
     return {
         "cpu": {"used": f(total["used"]), "idle": f(100 - total["used"]), "cores": ncpu, "model": modele, "freq": freq,
                 "user": f(total["user"]), "system": f(total["system"]), "iowait": f(total["iowait"]),
@@ -120,6 +162,7 @@ def live_stats(app, socketio):
     """Tâche de fond lancée à la première connexion au websocket : un relevé par seconde, émis à tous les navigateurs."""
     with app.app_context():
         modele, freq = _modele()
+        seuils = lire_seuils(app.config, app.logger)  # swizzin.cfg n'est lu qu'au démarrage du panel
         devs, relire = _peripheriques(), time.monotonic() + RELIRE_DISQUES
         avant, t_avant = None, None
         while True:
@@ -128,8 +171,8 @@ def live_stats(app, socketio):
                     devs, relire = _peripheriques(), time.monotonic() + RELIRE_DISQUES
                 apres, t_apres = (_cpu(), _disques()), time.monotonic()
                 if avant is not None:
-                    socketio.emit('live', mesure(avant, apres, max(t_apres - t_avant, 0.001), modele, freq, devs),
-                                  namespace='/websocket')
+                    socketio.emit('live', mesure(avant, apres, max(t_apres - t_avant, 0.001), modele, freq, devs,
+                                                 seuils), namespace='/websocket')
                 avant, t_avant = apres, t_apres
             except Exception:
                 app.logger.exception("live_stats : relevé impossible")
