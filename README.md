@@ -9,7 +9,9 @@
 
 <img src="docs/screenshots/disk-info.png" alt="Disk Info card: one box per disk, an unreadable or unmounted disk marked UNAVAILABLE" width="360">
 
-*Screenshots made with demo data: the dashboard with the live cards, then the Disk Info card, one box per disk, with a disk that went away shown as UNAVAILABLE.*
+<img src="docs/screenshots/disk-alert-orange.png" alt="Disk almost full: an orange banner at the top of the dashboard, /mnt/data is 92% used, and its bar is orange" width="49%"> <img src="docs/screenshots/disk-alert-red.png" alt="Disk almost full: a red banner at the top of the dashboard, /mnt/data is 97% used, and its bar is red" width="49%">
+
+*Screenshots made with demo data: the dashboard with the live cards, then the Disk Info card, one box per disk, with a disk that went away shown as UNAVAILABLE, then the disk almost full banner, orange from 90 % and red from 95 %.*
 
 ### What is different from upstream (`master`, b2eca76)
 
