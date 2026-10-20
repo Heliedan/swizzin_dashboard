@@ -233,6 +233,16 @@ class Banner(NodeTest):
         self.assertEqual([snap["summaryChanges"] for snap in snaps], [0, 0, 1, 1, 0, 1])
         self.assertEqual(snaps[3]["banner"]["lines"], [])  # the visible banner leaves it, as before
 
+    def test_an_unavailable_disk_outside_the_card_is_not_named(self):
+        """A disk plugged in after the page was loaded is not in the Disk Info card: the summary does not name it."""
+        calm = {"/": disk("50.00"), "/srv/media": disk("50.00"), TRAP: disk("50.00")}
+        snaps = self.run_page([
+            {"live": dict(calm, **{TRAP: disk("96.10", "3.90 GiB", "critical")})},
+            {"live": dict(calm, **{"/not/in/the/card": {"unavailable": True}})},
+        ])
+        self.assertEqual([snap["summary"]["text"] for snap in snaps],
+                         ["", f"Disk almost full, critical: {TRAP}", "No disk is almost full anymore."])
+
     def test_no_disk_info_card_no_banner(self):
         snaps = self.run_page([{"live": ALERTS}], user="friend", quota=True)
         self.assertIsNone(snaps[1]["banner"])
