@@ -118,6 +118,13 @@ class DeadShare:
         self.answered.set()
 
 
+def no_thread_can_start():
+    """The Sonde's threads, as at the limit of processes: starting one raises RuntimeError."""
+    thread = mock.MagicMock()
+    thread.return_value.start.side_effect = RuntimeError("can't start new thread")
+    return mock.patch.object(live_stats, "_Thread", thread)
+
+
 class WithoutDevDevice(unittest.TestCase):
     """ZFS datasets and network shares (NFS...) have no /dev/ device. They are followed live too, read apart: a share
     that stopped answering is shown as unavailable, and never freezes the live cards or the panel."""
@@ -255,6 +262,61 @@ class WithoutDevDevice(unittest.TestCase):
             self.assertEqual(sonde.releve([ZFS], attendre=True), {ZFS: TANK})
         self.assertLess(time.monotonic() - start, 0.5 + 0.2)
         self.assertGreaterEqual(self.share.calls.count(ZFS), 2)  # the live loop did start another one meanwhile
+
+    def test_a_reading_that_cannot_start_counts_as_no_answer(self):
+        """At the limit of processes (pids.max of the service...), starting a thread raises RuntimeError."""
+        sonde = live_stats.Sonde(delai=5)
+        self.assertEqual(sonde.releve([ZFS], attendre=True), {ZFS: TANK})  # it answered once
+        with no_thread_can_start():
+            start = time.monotonic()
+            self.assertEqual(sonde.releve([ZFS, NFS]), {ZFS: None, NFS: None})  # not its last answer either
+            self.assertEqual(sonde.releve([ZFS], attendre=True), {ZFS: None})
+            self.assertLess(time.monotonic() - start, 0.1)  # nothing waited for
+        self.assertEqual(sonde.releve([ZFS], attendre=True), {ZFS: TANK})  # threads start again: it comes back
+
+    def test_the_live_cards_go_on_when_no_thread_can_start(self):
+        class Stop(Exception):
+            pass
+
+        class FakeSocketIO:
+            def __init__(self):
+                self.sent, self.sleeps = [], 0
+
+            def emit(self, event, data, namespace=None):
+                self.sent.append(data)
+
+            def sleep(self, seconds):
+                self.sleeps += 1
+                if self.sleeps == 4:
+                    raise Stop
+
+        sio = FakeSocketIO()
+        with no_thread_can_start(), \
+                mock.patch.object(live_stats, "SONDE", live_stats.Sonde(delai=2)), \
+                mock.patch.object(live_stats, "peripheriques", return_value={"/": "sda1", ZFS: None}), \
+                mock.patch.object(live_stats, "a_part", return_value=[ZFS]), \
+                mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
+                mock.patch.object(live_stats, "_cpu", return_value=CPU_A), \
+                mock.patch.object(live_stats, "_disques", return_value={}):
+            with self.assertRaises(Stop):
+                live_stats.live_stats(swizzin.app, sio)
+        self.assertEqual(len(sio.sent), 3)  # CPU and RAM go on: the 1st reading only prepares the 2nd one
+        for data in sio.sent:
+            self.assertEqual(set(data), {"cpu", "ram", "disks"})
+            self.assertEqual(data["disks"][ZFS], {"unavailable": True})
+            self.assertEqual(data["disks"]["/"]["perutil"], "95.00")
+
+    def test_the_stats_route_answers_when_no_thread_can_start(self):
+        client = swizzin.app.test_client()
+        with no_thread_can_start(), \
+                mock.patch.object(swizzin, "SONDE", live_stats.Sonde(delai=0.3)), \
+                mock.patch.object(swizzin, "get_mounts", return_value=["/", ZFS]), \
+                mock.patch.object(swizzin, "peripheriques", return_value={"/": "sda1", ZFS: None}), \
+                mock.patch.object(swizzin, "a_part", return_value=[ZFS]), \
+                self.assertLogs(swizzin.app.logger, "WARNING"):
+            r = client.get("/stats/disk", headers=AUTH)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(sorted(r.get_json()), ["/"])
 
     def test_an_unreadable_mount_is_unavailable(self):
         sonde = live_stats.Sonde(delai=5)

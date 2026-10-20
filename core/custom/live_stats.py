@@ -156,21 +156,27 @@ class Sonde:
         return self._en_cours(mnt) and time.monotonic() - self._lancees[mnt][1] >= self.delai
 
     def releve(self, montages, attendre=False):
-        """{montage: (taille, utilisé, libre, %), ou None : illisible, démonté ou sans réponse depuis `delai` s}.
+        """{montage: (taille, utilisé, libre, %), ou None : illisible, démonté, sans réponse depuis `delai` s, ou
+        sans lecture possible (thread impossible à lancer : limite de processus atteinte)}.
 
         Lance une lecture pour chaque montage qui n'en a pas en cours. Sans attendre (boucle des cartes), donne la
         dernière réponse reçue. En attendant (route /stats/disk) : celle en cours, jusqu'à l'appel + `delai` secondes
         au plus, même si la boucle des cartes lance entre-temps une nouvelle lecture d'un partage lent."""
-        debut = time.monotonic()
+        debut, sans_thread = time.monotonic(), set()
         for mnt in montages:
             if not self._en_cours(mnt):
                 numero = next(self._numeros)
-                _Thread(target=self._lire, args=(mnt, numero), daemon=True).start()
+                try:
+                    _Thread(target=self._lire, args=(mnt, numero), daemon=True).start()
+                except RuntimeError:  # limite de processus (pids.max...) : sans réponse, sans faire taire CPU et RAM
+                    sans_thread.add(mnt)
+                    continue
                 self._lancees[mnt] = (numero, debut)  # après start() : un thread qui n'a pas démarré est relancé
         while attendre and time.monotonic() < debut + self.delai and any(
                 self._en_cours(m) and not self._bloquee(m) for m in montages):
             time.sleep(0.01)  # pause verte sous eventlet : le panel continue pendant l'attente
-        return {m: None if self._bloquee(m) else self._finies.get(m, (None, None))[1] for m in montages}
+        return {m: None if m in sans_thread or self._bloquee(m) else self._finies.get(m, (None, None))[1]
+                for m in montages}
 
 
 SONDE = Sonde()  # une seule pour la boucle des cartes et la route /stats/disk : un thread bloqué au plus par montage
