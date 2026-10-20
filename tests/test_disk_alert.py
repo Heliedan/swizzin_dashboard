@@ -265,10 +265,14 @@ class Page(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         return r.get_data(as_text=True)
 
-    def test_the_banner_is_an_empty_live_region_until_a_disk_fills_up(self):
-        """Always there and empty (not hidden): screen readers then read what appears in it."""
+    def test_only_the_summary_of_the_banner_is_a_live_region(self):
+        """The summary is always there and empty (not hidden from screen readers): they read what appears in it.
+        The visible lines change nearly every second during a download: they are not a live region."""
         page = self.get_dashboard("tester", ["/"])
-        self.assertIn('<div id="alerte-disque" role="status" aria-live="polite"></div>', page)
+        self.assertIn('<div id="alerte-disque"></div>\n'
+                      '        <div id="alerte-disque-resume" class="sr-only" role="status" aria-live="polite"></div>',
+                      page)
+        self.assertEqual(page.count("aria-live"), 1)
         self.assertIn('id="carte-disque"', page)
 
     def test_the_minute_poll_stops_only_once_the_live_card_has_data(self):
@@ -286,6 +290,7 @@ class Page(unittest.TestCase):
                 page = self.get_dashboard(user, ["/"], quota)
                 self.assertEqual('id="carte-disque"' in page, shown)
                 self.assertEqual('id="alerte-disque"' in page, shown)
+                self.assertEqual('id="alerte-disque-resume"' in page, shown)
 
     def test_a_trapped_mount_path_is_escaped(self):
         page = self.get_dashboard("tester", ["/", TRAP])

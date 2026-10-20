@@ -20,10 +20,13 @@
   <!-- #page-content-wrapper -->
   <div class="container-fluid">
       {# 2026-10-20 : bandeau « disque bientôt plein », rempli par static/js/live_stats.js. Même condition que la
-         carte Disk Info : qui ne voit pas la carte ne voit pas le bandeau. Voir le README. #}
+         carte Disk Info : qui ne voit pas la carte ne voit pas le bandeau. Voir le README.
+         Ses lignes visibles changent presque chaque seconde (espace libre) : elles ne sont pas une zone « live ».
+         Les lecteurs d'écran lisent seulement le résumé caché qui suit, toujours présent et vide au départ. #}
       {% set carte_disque = (quota == False or config.ADMIN_USER == user) %}
       {% if carte_disque %}
-        <div id="alerte-disque" role="status" aria-live="polite"></div>
+        <div id="alerte-disque"></div>
+        <div id="alerte-disque-resume" class="sr-only" role="status" aria-live="polite"></div>
       {% endif %}
       <div class="card-columns live-layout">
           {# 2026-10-09 : CPU Info (ex-System Info), RAM Info puis Disk Info, groupées et actualisées chaque seconde ;

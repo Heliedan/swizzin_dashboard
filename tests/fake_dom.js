@@ -169,6 +169,7 @@ function colours(el) {
 
 function snapshot() {
   const banner = document.getElementById('alerte-disque');
+  const summary = document.getElementById('alerte-disque-resume');
   const card = document.getElementById('carte-disque');
   const text = id => { const e = document.getElementById(id); return e ? e.textContent : null; };
   const disks = {};
@@ -187,6 +188,9 @@ function snapshot() {
     },
     bannerChanges: banner ? changes.filter(n => banner.contains(n)).length : 0,
     bannerAdded: banner ? added.filter(a => a.parent === banner).map(a => [a.cls, a.text]) : [],
+    summary: summary && { role: summary.getAttribute('role'), live: summary.getAttribute('aria-live'),
+                          cls: summary.className, text: summary.textContent },
+    summaryChanges: summary ? changes.filter(n => summary.contains(n)).length : 0,
     disks, liveMark: card ? card.hasAttribute('data-direct') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
   };
