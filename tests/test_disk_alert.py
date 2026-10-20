@@ -270,11 +270,13 @@ class Page(unittest.TestCase):
         self.assertIn('<div id="alerte-disque" class="mt-3" hidden></div>', page)
         self.assertIn('id="carte-disque"', page)
 
-    def test_the_minute_poller_leaves_the_live_card_alone(self):
-        """/stats/disk, polled every minute, would paint a disk at 92 % red over the orange of the alert."""
-        guard = "if (document.getElementById('carte-disque')) { return; }"
+    def test_the_minute_poll_stops_only_once_the_live_card_has_data(self):
+        """Without socket.io (CDN blocked), the poll must keep filling the card, as it did before."""
+        guard = "if (carte && carte.hasAttribute('data-direct')) { return; }"
         page = self.get_dashboard("tester", ["/"])
-        self.assertRegex(page, r"\(function diskusage\(\) \{\s*" + re.escape(guard) + r"\s*\$\.ajax\(\{")
+        self.assertRegex(page, r"\(function diskusage\(\) \{\s*var carte = document\.getElementById\('carte-disque'\);\s*"
+                         + re.escape(guard) + r"\s*\$\.ajax\(\{")
+        self.assertRegex(page, r"success: function\(data\) \{\s*" + re.escape(guard))
 
     def test_same_rights_as_the_disk_info_card(self):
         for user, quota, shown in (("tester", False, True), ("friend", False, True),

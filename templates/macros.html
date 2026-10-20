@@ -346,10 +346,11 @@ appstatus();
 })();
 
 (function diskusage() {
-  {# 2026-10-20 : la carte Disk Info en direct (static/js/live_stats.js) met déjà les disques à jour chaque seconde,
-     avec la couleur de l'alerte « disque bientôt plein ». Ce relevé de chaque minute la repeindrait
-     avec ses propres seuils (rouge au-dessus de 90 %). #}
-  if (document.getElementById('carte-disque')) { return; }
+  {# 2026-10-20 : dès que la carte Disk Info a reçu un relevé en direct (static/js/live_stats.js pose data-direct),
+     elle est mise à jour chaque seconde : ce relevé de chaque minute s'arrête. Avant, ou sans socket.io
+     (CDN bloqué...), il remplit la carte comme avant. #}
+  var carte = document.getElementById('carte-disque');
+  if (carte && carte.hasAttribute('data-direct')) { return; }
   $.ajax({
     url: "{{ url_for('disk_free') }}",
     statusCode: {
@@ -358,6 +359,7 @@ appstatus();
       }
     },
     success: function(data) {
+      if (carte && carte.hasAttribute('data-direct')) { return; }  {# le direct est arrivé pendant la requête #}
       for (var mount in data) {
         var percent = Math.trunc(data[mount]['perutil']);
         $("#"+$.escapeSelector(mount)+"diskfree").html(data[mount]['diskfree']);

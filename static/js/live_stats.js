@@ -117,6 +117,8 @@
     // Disques affichés sur la page mais absents des données (démontés depuis le chargement) : indisponibles.
     var carte = document.getElementById('carte-disque');
     if (carte) {
+      // 1er relevé en direct reçu : le relevé /stats/disk de chaque minute (templates/macros.html) s'arrête.
+      if (!carte.hasAttribute('data-direct')) { carte.setAttribute('data-direct', ''); }
       Array.prototype.forEach.call(carte.querySelectorAll('[id$="diskused"]'), function (el) {
         var m = el.id.slice(0, -'diskused'.length);
         if (!(m in d)) { d[m] = { unavailable: true }; }
