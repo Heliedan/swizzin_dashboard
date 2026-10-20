@@ -29,6 +29,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
             "DISK_WARN_PERCENT = 'ninety'\nDISK_CRIT_PERCENT = -5\n")
 
 import swizzin  # noqa: E402
+import core.util as util  # noqa: E402
 from core.custom import live_stats  # noqa: E402
 
 DEFAULTS = (90, 95)
@@ -100,6 +101,35 @@ class Levels(unittest.TestCase):
 
     def test_critical_wins_when_both_are_reached(self):
         self.assertEqual(live_stats.niveau_alerte(97, (96, 95)), "critical")
+
+
+class Percent(unittest.TestCase):
+    """The percentage of the card and of the alert is df's Use%: the blocks reserved for root are not free."""
+    GiB = 2 ** 30
+
+    def usage(self, total, used, available):
+        with mock.patch.object(util.shutil, "disk_usage", return_value=(total, used, available)):
+            return util.disk_usage("/")
+
+    def test_reserved_blocks_do_not_count_as_free(self):
+        """1000 GiB ext4 disk, 50 GiB reserved for root, 900 GiB used: 50 GiB left for the apps."""
+        total, used, free, pct = self.usage(1000 * self.GiB, 900 * self.GiB, 50 * self.GiB)
+        self.assertEqual(pct, "94.74")  # used / total said 90.00
+        self.assertEqual((total, used, free), ("1000.00 GiB", "900.00 GiB", "50.00 GiB"))
+
+    def test_a_disk_full_for_the_apps_is_100_and_critical(self):
+        _, _, free, pct = self.usage(1000 * self.GiB, 950 * self.GiB, 0)
+        self.assertEqual((pct, free), ("100.00", "0.00 B"))  # used / total said 95.00
+        self.assertEqual(live_stats.niveau_alerte(float(pct), DEFAULTS), "critical")
+
+    def test_an_empty_filesystem_does_not_divide_by_zero(self):
+        self.assertEqual(self.usage(0, 0, 0)[3], "0.00")
+
+    def test_the_real_root_disk_matches_df(self):
+        st = os.statvfs("/")
+        used, available = (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_bavail * st.f_frsize
+        pct = float(util.disk_usage("/")[3])
+        self.assertAlmostEqual(pct, used / (used + available) * 100, delta=0.05)  # the disk may change meanwhile
 
 
 class LiveEvent(unittest.TestCase):
