@@ -346,6 +346,11 @@ appstatus();
 })();
 
 (function diskusage() {
+  {# 2026-10-20 : dès que la carte Disk Info a reçu un relevé en direct (static/js/live_stats.js pose data-direct),
+     elle est mise à jour chaque seconde : ce relevé de chaque minute s'arrête. Avant, ou sans socket.io
+     (CDN bloqué...), il remplit la carte comme avant. #}
+  var carte = document.getElementById('carte-disque');
+  if (carte && carte.hasAttribute('data-direct')) { return; }
   $.ajax({
     url: "{{ url_for('disk_free') }}",
     statusCode: {
@@ -354,22 +359,18 @@ appstatus();
       }
     },
     success: function(data) {
+      if (carte && carte.hasAttribute('data-direct')) { return; }  {# le direct est arrivé pendant la requête #}
       for (var mount in data) {
         var percent = Math.trunc(data[mount]['perutil']);
         $("#"+$.escapeSelector(mount)+"diskfree").html(data[mount]['diskfree']);
         $("#"+$.escapeSelector(mount)+"diskused").html(data[mount]['diskused']);
         $("#"+$.escapeSelector(mount)+"disktotal").html(data[mount]['disktotal']);
         $("#"+$.escapeSelector(mount)+"diskpercent").html(data[mount]['perutil']);
-        if (Number(data[mount]['perutil']) > 90) {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-danger").removeClass("bg-success bg-warning");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-danger").removeClass("bg-success bg-warning");
-        } else if (Number(data[mount]['perutil']) > 75) {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-warning").removeClass("bg-success bg-danger");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-warning").removeClass("bg-success bg-danger");
-        } else {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-success").removeClass("bg-warning bg-danger");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-success").removeClass("bg-danger bg-warning");
-        }
+        {# 2026-10-20 : couleur du niveau d'alerte calculé par le serveur avec DISK_WARN_PERCENT et DISK_CRIT_PERCENT
+           (swizzin.cfg), comme la carte en direct et le bandeau « disque bientôt plein », au lieu de 75 % / 90 %. #}
+        var color = data[mount]['alert'] === 'critical' ? 'bg-danger' : (data[mount]['alert'] === 'warning' ? 'bg-warning' : 'bg-success');
+        $("#"+$.escapeSelector(mount)+"indicator.systemindicator").removeClass("bg-secondary bg-success bg-warning bg-danger").addClass(color);
+        $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).removeClass("bg-success bg-warning bg-danger").addClass(color);
       }
       setTimeout(function() {
         diskusage();

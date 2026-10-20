@@ -1,23 +1,32 @@
 /* 2026-10-09 : met à jour chaque seconde les cartes CPU Info, RAM Info et Disk Info (événement « live » du websocket).
-   Mêmes identifiants et mêmes seuils (75 % / 90 %) que les scripts d'origine du panel (templates/macros.html).
-   Voir le README. */
+   Mêmes identifiants et, pour CPU et RAM, mêmes seuils (75 % / 90 %) que les scripts d'origine du panel
+   (templates/macros.html).
+   2026-10-20 : bandeau « disque bientôt plein ». Les disques prennent la couleur de leur niveau d'alerte, avec les
+   seuils DISK_WARN_PERCENT et DISK_CRIT_PERCENT de swizzin.cfg. Voir le README. */
 (function () {
   'use strict';
 
   function niveau(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
 
-  function couleur(el, pct) {
+  // classe : couleur imposée (disques), sinon celle des seuils 75 % / 90 % (CPU, RAM).
+  function couleur(el, pct, classe) {
     if (!el) { return; }
     el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'disk-unavailable');
-    el.classList.add(niveau(pct));
+    el.classList.add(classe || niveau(pct));
   }
 
-  function barre(el, pct) {
+  function barre(el, pct, classe) {
     if (!el) { return; }
     var p = Math.max(0, Math.min(100, Number(pct) || 0));
     el.style.width = p + '%';
     el.setAttribute('aria-valuenow', Math.trunc(p));
-    couleur(el, p);
+    couleur(el, p, classe);
+  }
+
+  // Couleur d'un disque : celle de son niveau d'alerte, calculé par le serveur avec DISK_WARN_PERCENT et
+  // DISK_CRIT_PERCENT (swizzin.cfg). Mêmes seuils et mêmes couleurs que le bandeau, pas l'échelle 75 % / 90 %.
+  function couleurDisque(alerte) {
+    return alerte === 'critical' ? 'bg-danger' : (alerte === 'warning' ? 'bg-warning' : 'bg-success');
   }
 
   function texte(id, valeur) {
@@ -108,6 +117,8 @@
     // Disques affichés sur la page mais absents des données (démontés depuis le chargement) : indisponibles.
     var carte = document.getElementById('carte-disque');
     if (carte) {
+      // 1er relevé en direct reçu : le relevé /stats/disk de chaque minute (templates/macros.html) s'arrête.
+      if (!carte.hasAttribute('data-direct')) { carte.setAttribute('data-direct', ''); }
       Array.prototype.forEach.call(carte.querySelectorAll('[id$="diskused"]'), function (el) {
         var m = el.id.slice(0, -'diskused'.length);
         if (!(m in d)) { d[m] = { unavailable: true }; }
@@ -133,11 +144,51 @@
       texte(m + 'diskpercent', x.perutil);
       texte(m + 'diskread', x.read);
       texte(m + 'diskwrite', x.write);
-      barre(document.getElementById(m + 'diskprogress'), x.perutil);
+      barre(document.getElementById(m + 'diskprogress'), x.perutil, couleurDisque(x.alert));
       var ind = document.getElementById(m + 'indicator');
-      couleur(ind, Number(x.perutil));
+      couleur(ind, Number(x.perutil), couleurDisque(x.alert));
       if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // au survol : le remplissage en clair
     });
+  }
+
+  // 2026-10-20 : bandeau « disque bientôt plein » en haut du tableau de bord, un encart par disque de la carte
+  // Disk Info qui a atteint un seuil (avertissement en orange, critique en rouge). Il suit chaque relevé :
+  // il apparaît et disparaît en direct. Le chemin de montage vient du système (espaces, caractères spéciaux) :
+  // il n'est jamais inséré comme du HTML, seulement par textContent.
+  // Le bandeau est une zone role="status" aria-live="polite" (templates/index.html), toujours présente et vide quand
+  // aucun disque n'est en alerte : les lecteurs d'écran lisent ce qui y change. Un encart n'est donc touché que si
+  // son texte ou sa couleur change, pas à chaque relevé.
+  function alertes(d) {
+    var bandeau = document.getElementById('alerte-disque');
+    var carte = document.getElementById('carte-disque');
+    if (!bandeau || !carte) { return; }  // pas de carte Disk Info pour cet utilisateur : pas de bandeau non plus
+    var lignes = [];
+    Object.keys(d).forEach(function (m) {
+      var x = d[m];
+      if (x.unavailable || (x.alert !== 'warning' && x.alert !== 'critical')) { return; }
+      if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
+      var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
+      lignes.push({ alerte: x.alert, pct: pct,
+                    texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
+    });
+    lignes.sort(function (a, b) { return b.pct - a.pct; });  // le disque le plus plein en premier
+    lignes.forEach(function (l, i) {
+      // text-break : un chemin long sans espace passe à la ligne au lieu de déborder sur un téléphone.
+      var classe = 'alert mt-3 mb-0 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
+      var encart = bandeau.children[i];
+      if (!encart) {  // encart complet avant de l'ajouter : il est lu une seule fois
+        encart = document.createElement('div');
+        encart.className = classe;
+        encart.textContent = l.texte;
+        bandeau.appendChild(encart);
+        return;
+      }
+      if (encart.className !== classe) { encart.className = classe; }
+      if (encart.textContent !== l.texte) { encart.textContent = l.texte; }
+    });
+    while (bandeau.children.length > lignes.length) {  // disques revenus sous le seuil, démontés ou illisibles
+      bandeau.removeChild(bandeau.lastElementChild);
+    }
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -149,7 +200,7 @@
     socket.on('live', function (d) {
       if (d.cpu) { cpu(d.cpu); }
       if (d.ram) { ram(d.ram); }
-      if (d.disks) { disques(d.disks); }
+      if (d.disks) { disques(d.disks); alertes(d.disks); }
     });
   });
 })();

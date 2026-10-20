@@ -261,7 +261,9 @@ def disk_usage(location):
         totalh = GetHumanReadableBi(total)
         usedh = GetHumanReadableBi(used)
         freeh = GetHumanReadableBi(free)
-    usage = '{0:.2f}'.format((used / total * 100) if total else 0)
+    # Like df's Use%: used / (used + available). "free" is what a normal user can still write (df's Avail):
+    # the blocks reserved for root (5 % on ext4) are not free for the user, so a full disk shows 100 %.
+    usage = '{0:.2f}'.format((used / (used + free) * 100) if used + free else 0)
     return totalh, usedh, freeh, usage
 
 def quota_usage(username):

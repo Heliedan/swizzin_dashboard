@@ -62,7 +62,7 @@ if app.config['RATELIMIT_ENABLED'] == True:
     )
 
 from core.util import *
-from core.custom.live_stats import live_stats  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
+from core.custom.live_stats import live_stats, lire_seuils, niveau_alerte  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
 try:  # App Store page (core/custom/store, see the README): a problem there must not stop the panel
     from core.custom import store as app_store
     app_store.register(app, socketio, htpasswd)
@@ -386,6 +386,9 @@ def vnstat(user):
 @htpasswd.required
 def disk_free(user):
     mounts = get_mounts()
+    # Disk almost full alert (see the README): the same levels as the live cards, so that both paint a disk alike.
+    # An invalid setting is logged by the live cards, not here at every request.
+    thresholds = lire_seuils(app.config)
     data = {}
     for mount in mounts:
         try:
@@ -394,7 +397,8 @@ def disk_free(user):
             # One unreadable mount (removed disk, stale network share...) must not hide the others.
             app.logger.warning("disk stats: skipping %s (%s)", mount, e)
             continue
-        data[mount] = {"disktotal": total, "diskused": used, "diskfree": free, "perutil": usage}
+        data[mount] = {"disktotal": total, "diskused": used, "diskfree": free, "perutil": usage,
+                       "alert": niveau_alerte(float(usage), thresholds)}
     return flask.jsonify(data)
 
 @app.route('/stats/quota')
