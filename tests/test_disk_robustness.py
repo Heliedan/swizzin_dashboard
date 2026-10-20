@@ -236,6 +236,26 @@ class WithoutDevDevice(unittest.TestCase):
         self.assertEqual([disks[NFS] for disks in sio.sent], [{"unavailable": True}] * 4)
         self.assertEqual(self.share.calls.count(USB), 1)  # one blocked thread
 
+    def test_waiting_stops_at_the_delay_even_when_the_live_loop_starts_new_readings(self):
+        """A slow share (0.4 s a reading, 0.5 s allowed): while /stats/disk waits, the live loop starts a new reading as
+        soon as the last one ends. The route must not wait for those too: it stops at its start + the delay at most."""
+        self.share.slow = 0.4
+        sonde = live_stats.Sonde(delai=0.5)
+        start = time.monotonic()
+
+        class LiveLoop:  # the time module seen by the Sonde: each pause of the wait lets the live loop run
+            monotonic = staticmethod(time.monotonic)
+
+            @staticmethod
+            def sleep(seconds):
+                time.sleep(seconds)
+                if time.monotonic() - start < 2:  # then it stops, so that a wait without end ends all the same
+                    sonde.releve([ZFS])
+        with mock.patch.object(live_stats, "time", LiveLoop):
+            self.assertEqual(sonde.releve([ZFS], attendre=True), {ZFS: TANK})
+        self.assertLess(time.monotonic() - start, 0.5 + 0.2)
+        self.assertGreaterEqual(self.share.calls.count(ZFS), 2)  # the live loop did start another one meanwhile
+
     def test_an_unreadable_mount_is_unavailable(self):
         sonde = live_stats.Sonde(delai=5)
         with mock.patch.object(live_stats.os.path, "ismount", side_effect=lambda m: m != ZFS):  # unmounted since
