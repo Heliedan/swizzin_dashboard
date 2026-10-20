@@ -503,12 +503,12 @@ class Pieces(unittest.TestCase):
         self.assertEqual(os.listdir(self.w.archives), [])  # an unfinished copy does not stay
         self.assertEqual(remove_runner.copy_error(PermissionError(13, "Permission denied", "/x")), "Permission denied (/x)")
 
-    def program(self, path):
+    def program(self, path, seconds="60"):
         """A real process whose program lies at path in the fake root (a copy of sleep)."""
         real = self.w.path(path)
         os.makedirs(os.path.dirname(real), exist_ok=True)
         shutil.copy(shutil.which("sleep"), real)
-        p = subprocess.Popen([real, "60"])
+        p = subprocess.Popen([real, seconds])
         self.addCleanup(p.wait)
         self.addCleanup(p.kill)
         return p
@@ -541,6 +541,24 @@ class Pieces(unittest.TestCase):
             self.assertEqual(self.r.apt_busy(), "apt-get is running")
             with self.in_a_container(p):
                 self.assertIsNone(self.r.apt_busy())
+
+    @staticmethod
+    def state(pid):
+        """The state of a process, read from /proc (R, S, Z...)."""
+        with open("/proc/%d/stat" % pid) as f:
+            return f.read().rpartition(")")[2].split()[0]
+
+    def test_an_ended_apt_not_collected_yet_does_not_hold_this_server(self):
+        """A zombie (state Z): apt-get has ended, and its parent has not collected it yet. It holds no lock."""
+        ended = self.program("/opt/tools/apt-get", "0")
+        end = time.monotonic() + 10
+        while self.state(ended.pid) != "Z" and time.monotonic() < end:  # this test is its parent: not collected
+            time.sleep(0.01)
+        self.assertEqual(self.state(ended.pid), "Z")
+        with mock.patch.dict(os.environ, self.w.env()):
+            self.assertIsNone(self.r.apt_busy())
+            self.program("/usr/local/bin/apt-get")  # one that runs still counts
+            self.assertEqual(self.r.apt_busy(), "apt-get is running")
 
 
 if __name__ == "__main__":

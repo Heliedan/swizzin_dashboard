@@ -60,6 +60,15 @@ def in_this_system(pid, proc="/proc"):
         return True  # cannot tell: counted
 
 
+def zombie(pid, proc="/proc"):
+    """True for a process that has ended but that its parent has not collected yet (state Z): it holds no lock."""
+    try:
+        with open("%s/%s/stat" % (proc, pid)) as f:
+            return f.read().rpartition(")")[2].split()[0] == "Z"  # after the name, which may hold ")" or spaces
+    except (OSError, IndexError):
+        return False  # cannot tell: counted
+
+
 def copy_error(e):
     """Why a copy failed, in words (not "[Errno 28] ...")."""
     if isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT):
@@ -315,7 +324,7 @@ class Removal:
                         name = f.read().strip()
                 except OSError:
                     continue
-                if name in APT_PROCESSES:
+                if name in APT_PROCESSES and not zombie(pid):
                     return "%s is running" % name
         return None
 
