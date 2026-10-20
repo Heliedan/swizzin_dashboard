@@ -1,23 +1,30 @@
 /* 2026-10-09 : met à jour chaque seconde les cartes CPU Info, RAM Info et Disk Info (événement « live » du websocket).
    Mêmes identifiants et mêmes seuils (75 % / 90 %) que les scripts d'origine du panel (templates/macros.html).
+   2026-10-20 : bandeau « disque bientôt plein » ; un disque en alerte prend la couleur de l'alerte.
    Voir le README. */
 (function () {
   'use strict';
 
   function niveau(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
 
-  function couleur(el, pct) {
+  // classe : couleur imposée (alerte disque), sinon celle des seuils 75 % / 90 %.
+  function couleur(el, pct, classe) {
     if (!el) { return; }
     el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'disk-unavailable');
-    el.classList.add(niveau(pct));
+    el.classList.add(classe || niveau(pct));
   }
 
-  function barre(el, pct) {
+  function barre(el, pct, classe) {
     if (!el) { return; }
     var p = Math.max(0, Math.min(100, Number(pct) || 0));
     el.style.width = p + '%';
     el.setAttribute('aria-valuenow', Math.trunc(p));
-    couleur(el, p);
+    couleur(el, p, classe);
+  }
+
+  // Niveau d'alerte « disque bientôt plein » calculé par le serveur (seuils de swizzin.cfg) → couleur Bootstrap.
+  function classeAlerte(alerte) {
+    return alerte === 'critical' ? 'bg-danger' : (alerte === 'warning' ? 'bg-warning' : null);
   }
 
   function texte(id, valeur) {
@@ -133,11 +140,45 @@
       texte(m + 'diskpercent', x.perutil);
       texte(m + 'diskread', x.read);
       texte(m + 'diskwrite', x.write);
-      barre(document.getElementById(m + 'diskprogress'), x.perutil);
+      // Disque en alerte : la barre et la pastille prennent la couleur du bandeau (orange ou rouge).
+      barre(document.getElementById(m + 'diskprogress'), x.perutil, classeAlerte(x.alert));
       var ind = document.getElementById(m + 'indicator');
-      couleur(ind, Number(x.perutil));
+      couleur(ind, Number(x.perutil), classeAlerte(x.alert));
       if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // au survol : le remplissage en clair
     });
+  }
+
+  // 2026-10-20 : bandeau « disque bientôt plein » en haut du tableau de bord, un encart par disque de la carte
+  // Disk Info qui a atteint un seuil (avertissement en orange, critique en rouge). Il suit chaque relevé :
+  // il apparaît et disparaît en direct. Le chemin de montage vient du système (espaces, caractères spéciaux) :
+  // il n'est jamais inséré comme du HTML, seulement par textContent.
+  var dernierBandeau = null;
+
+  function alertes(d) {
+    var bandeau = document.getElementById('alerte-disque');
+    var carte = document.getElementById('carte-disque');
+    if (!bandeau || !carte) { return; }  // pas de carte Disk Info pour cet utilisateur : pas de bandeau non plus
+    var lignes = [];
+    Object.keys(d).forEach(function (m) {
+      var x = d[m];
+      if (x.unavailable || !classeAlerte(x.alert)) { return; }
+      if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
+      var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
+      lignes.push({ alerte: x.alert, pct: pct,
+                    texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
+    });
+    lignes.sort(function (a, b) { return b.pct - a.pct; });  // le disque le plus plein en premier
+    var cle = JSON.stringify(lignes);
+    if (cle === dernierBandeau) { return; }  // rien de changé depuis le relevé précédent
+    dernierBandeau = cle;
+    bandeau.textContent = '';
+    lignes.forEach(function (l) {
+      var encart = document.createElement('div');
+      encart.className = 'alert mb-2 ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
+      encart.textContent = l.texte;
+      bandeau.appendChild(encart);
+    });
+    bandeau.hidden = lignes.length === 0;
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -149,7 +190,7 @@
     socket.on('live', function (d) {
       if (d.cpu) { cpu(d.cpu); }
       if (d.ram) { ram(d.ram); }
-      if (d.disks) { disques(d.disks); }
+      if (d.disks) { disques(d.disks); alertes(d.disks); }
     });
   });
 })();

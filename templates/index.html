@@ -19,13 +19,19 @@
   {% endif %}
   <!-- #page-content-wrapper -->
   <div class="container-fluid">
+      {# 2026-10-20 : bandeau « disque bientôt plein », rempli par static/js/live_stats.js. Même condition que la
+         carte Disk Info : qui ne voit pas la carte ne voit pas le bandeau. Voir le README. #}
+      {% set carte_disque = (quota == False or config.ADMIN_USER == user) %}
+      {% if carte_disque %}
+        <div id="alerte-disque" class="mt-3" hidden></div>
+      {% endif %}
       <div class="card-columns live-layout">
           {# 2026-10-09 : CPU Info (ex-System Info), RAM Info puis Disk Info, groupées et actualisées chaque seconde ;
              « At a Glance » retirée (ses pastilles sont dans chaque carte). Voir le README. #}
           <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
             {% include 'cpuinfo.html' %}
             {% include 'raminfo_live.html' %}
-            {% if (quota == False or config.ADMIN_USER == user) %}
+            {% if carte_disque %}
               {% include 'diskinfo_live.html' %}
             {% endif %}
           </div>
