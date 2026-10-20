@@ -204,6 +204,20 @@ class WithoutDevDevice(unittest.TestCase):
             self.assertEqual(live_stats.a_part(devs), [NFS, USB, "/mnt/ssh/disk", "/mnt/top"])
             self.assertEqual(live_stats.a_part({"/": "sda1", "/not/mounted": None}), ["/not/mounted"])
 
+    def test_with_no_dev_device_at_the_root_every_disk_is_read_apart(self):
+        """/ on NFS (a server without a disk of its own), overlay (a container)...: reaching any disk crosses it."""
+        for root in ("192.168.1.10:/root / nfs4 rw 0 0\n", "overlay / overlay rw 0 0\n"):
+            with mock.patch("builtins.open", fake_open(root + "/dev/sdb1 /mnt/data ext4 rw 0 0\n")):
+                self.assertEqual(live_stats.a_part({"/mnt/data": "sdb1"}), ["/mnt/data"], root)
+
+    def test_a_disk_inside_a_share_whose_path_holds_a_space_is_read_apart(self):
+        """/proc/mounts writes a space as \\040: the share's path is decoded before it is compared."""
+        mounts = ("/dev/sda1 / ext4 rw 0 0\n"
+                  "192.168.1.10:/export /mnt/my\\040nas nfs4 rw 0 0\n"
+                  "/dev/sdb1 /mnt/my\\040nas/usb ext4 rw 0 0\n")
+        with mock.patch("builtins.open", fake_open(mounts)):
+            self.assertEqual(live_stats.a_part(live_stats.peripheriques()), ["/mnt/my nas", "/mnt/my nas/usb"])
+
     def test_a_disk_inside_a_share_keeps_its_speeds(self):
         with swizzin.app.app_context():
             disks = live_stats.mesure((CPU_A, {"sdb1": (0, 0)}), (CPU_B, {"sdb1": (4096, 1024)}), 1.0, "test", "",
