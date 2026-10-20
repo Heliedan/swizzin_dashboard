@@ -35,7 +35,7 @@ In the live Disk Info card, **each disk has its own light box** with its read/wr
 - `/stats/disk` waits 5 seconds at most, then leaves the mount out (and logs it), as it does for any unreadable mount;
 - nothing can interrupt a thread stuck on a dead share: it stays until the share answers, but no other reading of that mount is started meanwhile, so threads do not pile up. When the share answers again, the mount comes back by itself.
 
-Disks with a `/dev/` device are read as before, directly: the kernel answers for them at once.
+Disks with a `/dev/` device are read directly, as before: a local disk normally answers at once. A disk mounted inside a mount without a `/dev/` device (a USB disk at `/mnt/nas/usb` in an NFS share at `/mnt/nas`, for example) is the exception: reaching it goes through the share, so it is read apart too, with the same limits, and keeps its read and write speeds.
 
 <a id="stats-disk"></a>**For scripts that call `/stats/disk`** (with the panel login): it answers one entry per mount of the Disk Info card, with `disktotal`, `diskused`, `diskfree` (text such as `"11.20 GiB"`, or `"12.03 GB"` with `DISK_UNITS = "si"`), `perutil` (the percentage used, computed like `df`, as text with two decimals such as `"92.34"`) and, new in this edition, **`alert`**: the level of the disk almost full alert, with the thresholds of `swizzin.cfg`.
 

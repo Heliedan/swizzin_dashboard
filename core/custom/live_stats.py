@@ -5,7 +5,8 @@ Ce fichier est dans core/custom/ : la mise à jour du panel le conserve. Voir le
 Charge moyenne et top des programmes retirés le 2026-10-09 : plus aucun relevé des processus.
 Alerte « disque bientôt plein » ajoutée le 2026-10-20 : niveau calculé ici pour chaque disque, bandeau affiché
 par static/js/live_stats.js. Seuils DISK_WARN_PERCENT et DISK_CRIT_PERCENT dans swizzin.cfg.
-Montages sans périphérique /dev/ (ZFS, NFS...) suivis en direct depuis le 2026-10-20, lus à part (classe Sonde)."""
+Montages sans périphérique /dev/ (ZFS, NFS...) suivis en direct depuis le 2026-10-20, lus à part (classe Sonde),
+comme les disques montés à l'intérieur de l'un d'eux (fonction a_part)."""
 import itertools
 import os
 import time
@@ -103,8 +104,28 @@ def peripheriques(montages=None):
     return out
 
 
+def a_part(devs):
+    """Les montages de `devs` (peripheriques()) à lire à part, par la Sonde : ceux sans périphérique /dev/, et ceux
+    situés sous un montage sans périphérique /dev/ ou sur le même chemin (un disque USB monté dans un partage NFS :
+    /mnt/nas/usb), d'après tout /proc/mounts, y compris les montages que le panel n'affiche pas (sshfs...).
+
+    Pour atteindre /mnt/nas/usb, le système traverse /mnt/nas : si le partage ne répond plus, la recherche du chemin
+    attend sans limite, avant même de lire le disque. Ces disques gardent leur périphérique dans `devs`, pour leurs
+    débits de lecture et d'écriture. Dans le doute (l'ordre de /proc/mounts), un disque est lu à part : sans risque,
+    il est lu de la même façon, dans un thread."""
+    sans_dev = set()
+    with open('/proc/mounts') as f:
+        for ligne in f:
+            dev, mnt = ligne.split()[:2]
+            if not dev.startswith('/dev/'):
+                sans_dev.add(util.unescape_mount(mnt))
+    return [m for m, dev in devs.items()
+            if dev is None or any(m == p or m.startswith(p.rstrip('/') + '/') for p in sans_dev)]
+
+
 class Sonde:
-    """Occupation des montages sans périphérique /dev/ (datasets ZFS, partages réseau NFS...), lue à part.
+    """Occupation des montages sans périphérique /dev/ (datasets ZFS, partages réseau NFS...) et des disques montés
+    à l'intérieur de l'un d'eux (a_part), lue à part.
 
     Sur un partage réseau qui ne répond plus, statvfs() attend sans limite. Sous eventlet (swizzin.py), cette attente
     figerait tout le panel, boucle des cartes en direct comprise. Chaque lecture se fait donc dans un vrai thread du
@@ -135,19 +156,27 @@ class Sonde:
         return self._en_cours(mnt) and time.monotonic() - self._lancees[mnt][1] >= self.delai
 
     def releve(self, montages, attendre=False):
-        """{montage: (taille, utilisé, libre, %), ou None : illisible, démonté ou sans réponse depuis `delai` s}.
+        """{montage: (taille, utilisé, libre, %), ou None : illisible, démonté, sans réponse depuis `delai` s, ou
+        sans lecture possible (thread impossible à lancer : limite de processus atteinte)}.
 
         Lance une lecture pour chaque montage qui n'en a pas en cours. Sans attendre (boucle des cartes), donne la
-        dernière réponse reçue. En attendant (route /stats/disk) : celle en cours, `delai` secondes au plus."""
-        debut = time.monotonic()
+        dernière réponse reçue. En attendant (route /stats/disk) : celle en cours, jusqu'à l'appel + `delai` secondes
+        au plus, même si la boucle des cartes lance entre-temps une nouvelle lecture d'un partage lent."""
+        debut, sans_thread = time.monotonic(), set()
         for mnt in montages:
             if not self._en_cours(mnt):
                 numero = next(self._numeros)
-                _Thread(target=self._lire, args=(mnt, numero), daemon=True).start()
+                try:
+                    _Thread(target=self._lire, args=(mnt, numero), daemon=True).start()
+                except RuntimeError:  # limite de processus (pids.max...) : sans réponse, sans faire taire CPU et RAM
+                    sans_thread.add(mnt)
+                    continue
                 self._lancees[mnt] = (numero, debut)  # après start() : un thread qui n'a pas démarré est relancé
-        while attendre and any(self._en_cours(m) and not self._bloquee(m) for m in montages):
+        while attendre and time.monotonic() < debut + self.delai and any(
+                self._en_cours(m) and not self._bloquee(m) for m in montages):
             time.sleep(0.01)  # pause verte sous eventlet : le panel continue pendant l'attente
-        return {m: None if self._bloquee(m) else self._finies.get(m, (None, None))[1] for m in montages}
+        return {m: None if m in sans_thread or self._bloquee(m) else self._finies.get(m, (None, None))[1]
+                for m in montages}
 
 
 SONDE = Sonde()  # une seule pour la boucle des cartes et la route /stats/disk : un thread bloqué au plus par montage
@@ -194,17 +223,19 @@ def mesure(avant, apres, duree, modele, freq, devs, seuils=SEUILS_DEFAUT, lus=No
 
     Chaque disque lisible porte son niveau d'alerte (« alert ») selon `seuils`,
     pour le bandeau « disque bientôt plein ».
-    Les montages sans périphérique /dev/ (None dans `devs`) ne sont pas lus ici : `lus` donne leur occupation
-    (Sonde.releve). Ils n'ont pas de débits de lecture et d'écriture (rien dans /proc/diskstats)."""
+    Les montages lus à part (a_part) ne sont pas lus ici : `lus` donne leur occupation (Sonde.releve). Ceux sans
+    périphérique /dev/ (None dans `devs`) n'ont pas de débits de lecture et d'écriture (rien dans /proc/diskstats).
+    Un disque monté dans un partage réseau garde les siens."""
     (cpu_a, disq_a), (cpu_b, disq_b) = avant, apres
     total, _ = _repartition(cpu_a['cpu'], cpu_b['cpu'])
     coeurs = sorted((k for k in cpu_b if k != 'cpu'), key=lambda k: int(k[3:]))
     ncpu = len(coeurs) or os.cpu_count() or 1
     f = '{0:.1f}'.format
     disques = {}
+    lus = lus or {}
     for mnt, dev in devs.items():
-        if dev is None:  # ZFS, NFS... : lu à part, un partage réseau qui ne répond plus ne fige rien
-            occupation = (lus or {}).get(mnt)
+        if dev is None or mnt in lus:  # ZFS, NFS, un disque dans un partage : lu à part, un partage mort ne fige rien
+            occupation = lus.get(mnt)
         else:
             try:
                 if not os.path.ismount(mnt):  # démonté : le dossier vide donnerait les chiffres du disque parent
@@ -239,13 +270,15 @@ def live_stats(app, socketio):
         modele, freq = _modele()
         seuils = lire_seuils(app.config, app.logger)  # swizzin.cfg n'est lu qu'au démarrage du panel
         devs, relire = peripheriques(), time.monotonic() + RELIRE_DISQUES
+        apart = a_part(devs)
         avant, t_avant = None, None
         while True:
             try:
                 if time.monotonic() >= relire:  # un disque branché ou retiré pendant que le panel tourne
-                    devs, relire = peripheriques(), time.monotonic() + RELIRE_DISQUES
+                    devs = peripheriques()
+                    apart, relire = a_part(devs), time.monotonic() + RELIRE_DISQUES
                 apres, t_apres = (_cpu(), _disques()), time.monotonic()
-                lus = SONDE.releve([m for m, dev in devs.items() if dev is None])  # n'attend jamais
+                lus = SONDE.releve(apart)  # n'attend jamais
                 if avant is not None:
                     socketio.emit('live', mesure(avant, apres, max(t_apres - t_avant, 0.001), modele, freq, devs,
                                                  seuils, lus), namespace='/websocket')

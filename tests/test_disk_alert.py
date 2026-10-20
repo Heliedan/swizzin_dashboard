@@ -192,6 +192,7 @@ class LiveEvent(unittest.TestCase):
                 mock.patch.object(live_stats.os.path, "ismount", return_value=True), \
                 mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
                 mock.patch.object(live_stats, "peripheriques", return_value=devs), \
+                mock.patch.object(live_stats, "a_part", return_value=[]), \
                 mock.patch.object(live_stats, "_cpu", side_effect=[CPU_A, CPU_B]), \
                 mock.patch.object(live_stats, "_disques", return_value={}):
             with self.assertRaises(Stop):
@@ -236,6 +237,7 @@ class StatsRoute(unittest.TestCase):
         with mock.patch.dict(swizzin.app.config, config), \
                 mock.patch.object(swizzin, "get_mounts", return_value=list(percents)), \
                 mock.patch.object(swizzin, "peripheriques", side_effect=lambda ms: dict.fromkeys(ms, "sda")), \
+                mock.patch.object(swizzin, "a_part", return_value=[]), \
                 mock.patch.object(swizzin, "disk_usage", side_effect=lambda m: ("1 GiB", "1 GiB", "1 GiB", percents[m])):
             r = client.get("/stats/disk", headers=auth("tester"))
         self.assertEqual(r.status_code, 200)
