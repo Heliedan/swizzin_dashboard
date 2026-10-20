@@ -253,6 +253,22 @@ class Poll(NodeTest):
         snaps = self.run_page([{"ajax": {"/": polled("50.00")}}, {"live": ALERTS}, {"timer": True}], poll=True)
         self.assertEqual((snaps[-1]["requests"], snaps[-1]["timers"]), (1, 0))
 
+    def test_a_mount_without_dev_device_keeps_its_numbers_once_live(self):
+        """ZFS, NFS...: filled by /stats/disk when the page loads, then by every live reading (they were marked
+        UNAVAILABLE by the first one). They have no read and write speeds."""
+        tank = dict(disk("95.00", "51.20 GiB", "critical"), read=None, write=None)  # what the server sends
+        snaps = self.run_page([{"ajax": {"/srv/media": polled("95.00", "51.20 GiB", "critical")}},
+                               {"live": {"/": disk("50.00"), "/srv/media": tank, TRAP: disk("50.00")}},
+                               {"live": {"/": disk("50.00"), "/srv/media": tank, TRAP: disk("50.00")}}], poll=True)
+        for snap in snaps[1:]:
+            shown = snap["disks"]["/srv/media"]
+            self.assertEqual((shown["free"], shown["percent"], shown["bar"], shown["badge"]),
+                             ("51.20 GiB", "95.00", ["bg-danger"], ["bg-danger"]))
+        self.assertEqual((snaps[2]["disks"]["/srv/media"]["read"], snaps[2]["disks"]["/srv/media"]["write"]),
+                         ("—", "—"))
+        self.assertEqual([line["text"] for line in snaps[3]["banner"]["lines"]],
+                         ["Disk almost full: /srv/media is 95% used (51.20 GiB free)"])
+
     def test_without_socketio_the_poll_keeps_filling_the_card(self):
         snaps = self.run_page([
             {"ajax": {"/srv/media": polled("50.00", "50.00 GiB")}},

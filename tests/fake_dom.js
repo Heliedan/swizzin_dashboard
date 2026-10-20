@@ -177,6 +177,7 @@ function snapshot() {
     const m = el.id.slice(0, -'diskused'.length);
     const bar = document.getElementById(m + 'diskprogress');
     disks[m] = { used: text(m + 'diskused'), free: text(m + 'diskfree'), percent: text(m + 'diskpercent'),
+                 read: text(m + 'diskread'), write: text(m + 'diskwrite'),
                  bar: colours(bar), width: bar ? bar.style.width || '' : null,
                  badge: colours(document.getElementById(m + 'indicator')) };
   });

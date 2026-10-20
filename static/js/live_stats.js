@@ -142,8 +142,8 @@
       texte(m + 'diskfree', x.diskfree);
       texte(m + 'disktotal', x.disktotal);
       texte(m + 'diskpercent', x.perutil);
-      texte(m + 'diskread', x.read);
-      texte(m + 'diskwrite', x.write);
+      texte(m + 'diskread', x.read || '—');  // pas de débits sans périphérique /dev/ (ZFS, NFS...)
+      texte(m + 'diskwrite', x.write || '—');
       barre(document.getElementById(m + 'diskprogress'), x.perutil, couleurDisque(x.alert));
       var ind = document.getElementById(m + 'indicator');
       couleur(ind, Number(x.perutil), couleurDisque(x.alert));
