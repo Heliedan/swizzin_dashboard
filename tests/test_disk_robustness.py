@@ -33,8 +33,13 @@ AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:tester").decode()}
 CPU_A = {"cpu": [1, 0, 1, 10, 0, 0, 0, 0], "cpu0": [1, 0, 1, 10, 0, 0, 0, 0]}
 CPU_B = {"cpu": [2, 0, 2, 20, 0, 0, 0, 0], "cpu0": [2, 0, 2, 20, 0, 0, 0, 0]}
 ZFS, NFS = "/tank/media", "/mnt/nas"
+USB = NFS + "/usb"  # a /dev/ disk mounted inside the network share
 TANK = ("1.00 TiB", "972.80 GiB", "51.20 GiB", "95.00")
 NAS = ("100.00 GiB", "10.00 GiB", "90.00 GiB", "10.00")
+STICK = ("500.00 GiB", "460.00 GiB", "40.00 GiB", "92.00")
+SHARE_WITH_A_DISK = ("/dev/sda1 / ext4 rw 0 0\n"
+                     "192.168.1.10:/export /mnt/nas nfs4 rw 0 0\n"
+                     "/dev/sdb1 /mnt/nas/usb ext4 rw 0 0\n")
 REAL_SLEEP = live_stats.original("time").sleep  # blocks the system thread that calls it, as a slow disk does
 
 
@@ -90,8 +95,9 @@ class DiskRobustness(unittest.TestCase):
 
 class DeadShare:
     """disk_usage() of the panel, where NFS is a network share that stopped answering: reading it blocks the system
-    thread that asks, as statvfs() does, until answer() (or 10 s, so that a broken test cannot hang).
-    answers: readings of NFS answered before it stops answering. slow: seconds each reading of ZFS takes."""
+    thread that asks, as statvfs() does, until answer() (or 10 s, so that a broken test cannot hang). So does reading
+    a disk mounted inside it (USB): the path lookup crosses the share first.
+    answers: readings of NFS (and of USB) answered before it stops answering. slow: seconds a reading of ZFS takes."""
 
     def __init__(self):
         self.calls = []
@@ -101,10 +107,10 @@ class DeadShare:
 
     def __call__(self, mnt):
         self.calls.append(mnt)
-        if mnt == NFS:
-            if self.calls.count(NFS) > self.answers:
+        if mnt in (NFS, USB):
+            if self.calls.count(mnt) > self.answers:
                 self.answered.wait(10)
-            return NAS
+            return NAS if mnt == NFS else STICK
         REAL_SLEEP(self.slow)
         return TANK
 
@@ -175,6 +181,61 @@ class WithoutDevDevice(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 1)
         self.assertEqual(self.share.calls.count(NFS), 2)
 
+    def test_a_disk_mounted_inside_a_share_is_read_apart_too(self):
+        """Reaching /mnt/nas/usb crosses /mnt/nas: on a dead share, the path lookup waits before the disk is even read.
+        Every mount of /proc/mounts counts, even one the panel does not show (sshfs)."""
+        mounts = (SHARE_WITH_A_DISK +
+                  "/dev/sdc1 /mnt/nas2 ext4 rw 0 0\n"  # beside the share, not inside: read directly
+                  "me@host:/home /mnt/ssh fuse.sshfs rw 0 0\n"
+                  "/dev/sdd1 /mnt/ssh/disk ext4 rw 0 0\n"
+                  "192.168.1.10:/top /mnt/top nfs4 rw 0 0\n"
+                  "/dev/sde1 /mnt/top ext4 rw 0 0\n")  # a disk over a share: the share may still be crossed
+        with mock.patch("builtins.open", fake_open(mounts)):
+            devs = live_stats.peripheriques()
+            self.assertEqual(devs, {"/": "sda1", NFS: None, USB: "sdb1", "/mnt/nas2": "sdc1",
+                                    "/mnt/ssh/disk": "sdd1", "/mnt/top": "sde1"})  # devices kept for the speeds
+            self.assertEqual(live_stats.a_part(devs), [NFS, USB, "/mnt/ssh/disk", "/mnt/top"])
+            self.assertEqual(live_stats.a_part({"/": "sda1", "/not/mounted": None}), ["/not/mounted"])
+
+    def test_a_disk_inside_a_share_keeps_its_speeds(self):
+        with swizzin.app.app_context():
+            disks = live_stats.mesure((CPU_A, {"sdb1": (0, 0)}), (CPU_B, {"sdb1": (4096, 1024)}), 1.0, "test", "",
+                                      {"/": "sda1", NFS: None, USB: "sdb1"}, (90, 95), {NFS: NAS, USB: STICK})["disks"]
+        self.assertEqual(disks[USB], {"disktotal": "500.00 GiB", "diskused": "460.00 GiB", "diskfree": "40.00 GiB",
+                                      "perutil": "92.00", "read": "2.00 MiB/s", "write": "512.00 KiB/s",
+                                      "alert": "warning"})
+        self.assertEqual(self.share.calls, ["/"])  # read by the Sonde, not here
+
+    def test_the_live_cards_go_on_when_a_share_with_a_disk_inside_stops_answering(self):
+        class Stop(Exception):
+            pass
+
+        class FakeSocketIO:
+            def __init__(self):
+                self.sent = []
+
+            def emit(self, event, data, namespace=None):
+                self.sent.append(data["disks"])
+
+            def sleep(self, seconds):
+                if len(self.sent) == 4:
+                    raise Stop
+                time.sleep(0.1)
+
+        sio = FakeSocketIO()
+        start = time.monotonic()
+        with mock.patch("builtins.open", fake_open(SHARE_WITH_A_DISK)), \
+                mock.patch.object(live_stats, "SONDE", live_stats.Sonde(delai=2)), \
+                mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
+                mock.patch.object(live_stats, "_cpu", return_value=CPU_A), \
+                mock.patch.object(live_stats, "_disques", return_value={}):
+            with self.assertRaises(Stop):
+                live_stats.live_stats(swizzin.app, sio)
+        self.assertLess(time.monotonic() - start, 2)  # one reading every 0.1 s: nothing waited for the share
+        self.assertEqual([disks[USB] for disks in sio.sent], [{"unavailable": True}] * 4)
+        self.assertEqual([disks[NFS] for disks in sio.sent], [{"unavailable": True}] * 4)
+        self.assertEqual(self.share.calls.count(USB), 1)  # one blocked thread
+
     def test_an_unreadable_mount_is_unavailable(self):
         sonde = live_stats.Sonde(delai=5)
         with mock.patch.object(live_stats.os.path, "ismount", side_effect=lambda m: m != ZFS):  # unmounted since
@@ -203,6 +264,7 @@ class WithoutDevDevice(unittest.TestCase):
         # A delay longer than the five readings: a loop that waited for the share would take 2 s or more.
         with mock.patch.object(live_stats, "SONDE", live_stats.Sonde(delai=2)), \
                 mock.patch.object(live_stats, "peripheriques", return_value={"/": "sda1", ZFS: None, NFS: None}), \
+                mock.patch.object(live_stats, "a_part", return_value=[ZFS, NFS]), \
                 mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
                 mock.patch.object(live_stats, "_cpu", return_value=CPU_A), \
                 mock.patch.object(live_stats, "_disques", return_value={}):
@@ -222,6 +284,7 @@ class WithoutDevDevice(unittest.TestCase):
         with mock.patch.object(swizzin, "SONDE", live_stats.Sonde(delai=0.3)), \
                 mock.patch.object(swizzin, "get_mounts", return_value=["/", ZFS, NFS]), \
                 mock.patch.object(swizzin, "peripheriques", return_value={"/": "sda1", ZFS: None, NFS: None}), \
+                mock.patch.object(swizzin, "a_part", return_value=[ZFS, NFS]), \
                 self.assertLogs(swizzin.app.logger, "WARNING") as log:
             r = client.get("/stats/disk", headers=AUTH)
         self.assertGreaterEqual(time.monotonic() - start, 0.3)
@@ -230,6 +293,20 @@ class WithoutDevDevice(unittest.TestCase):
         self.assertEqual(sorted(r.get_json()), ["/", ZFS])
         self.assertEqual((r.get_json()[ZFS]["perutil"], r.get_json()[ZFS]["alert"]), ("95.00", "critical"))
         self.assertIn("skipping /mnt/nas (unreadable, or no answer within 0.3 seconds)", log.output[0])
+
+
+    def test_the_stats_route_leaves_a_disk_inside_a_dead_share_out_in_a_few_seconds(self):
+        client = swizzin.app.test_client()
+        start = time.monotonic()
+        with mock.patch("builtins.open", fake_open(SHARE_WITH_A_DISK)), \
+                mock.patch.object(swizzin, "disk_usage", side_effect=self.share), \
+                mock.patch.object(swizzin, "SONDE", live_stats.Sonde(delai=0.3)), \
+                self.assertLogs(swizzin.app.logger, "WARNING") as log:
+            r = client.get("/stats/disk", headers=AUTH)
+        self.assertLess(time.monotonic() - start, 2)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(sorted(r.get_json()), ["/"])
+        self.assertIn("skipping /mnt/nas/usb (unreadable, or no answer within 0.3 seconds)", "\n".join(log.output))
 
 
 if __name__ == "__main__":
