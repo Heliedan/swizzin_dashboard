@@ -1,7 +1,8 @@
 """The disk banner, the disk bars and the /stats/disk poll, run for real in Node.js.
 
 static/js/live_stats.js and the diskusage() poll of the dashboard run on the HTML the panel renders, in a small
-fake DOM (tests/fake_dom.js): no npm package to install. Skipped when node is not installed.
+fake DOM (tests/fake_dom.js): no npm package to install. Skipped when node is not installed, except with
+REQUIRE_NODE=1, set by the automatic tests (.github/workflows/tests.yml): there, a missing node fails them.
 
 Run from the repository root: python tests/test_disk_alert_js.py
 (uses a throwaway htpasswd file and fake disks: nothing on the machine is touched)."""
@@ -34,6 +35,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
 import swizzin  # noqa: E402
 
 NODE = shutil.which("node")
+NODE_REQUIRED = os.environ.get("REQUIRE_NODE") == "1"  # the automatic tests: never skipped in silence
 FAKE_DOM = os.path.join(ROOT, "tests", "fake_dom.js")
 LIVE_STATS = os.path.join(ROOT, "static", "js", "live_stats.js")
 TRAP = "/mnt/<img src=x onerror=alert(1)> it's \"mine\" & yours"
@@ -93,8 +95,13 @@ def dashboard(user, mounts, quota):
     return r.get_data(as_text=True)
 
 
-@unittest.skipUnless(NODE, "node is not installed")
+@unittest.skipUnless(NODE or NODE_REQUIRED, "node is not installed")
 class NodeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not NODE:
+            raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
+
     def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False):
         """Loads the dashboard in the fake DOM, plays the steps; returns a snapshot after loading and after each."""
         page = dashboard(user, mounts, quota)
@@ -119,7 +126,6 @@ class Banner(NodeTest):
         self.assertEqual([line["text"] for line in after["banner"]["lines"]],
                          [f"Disk almost full: {TRAP} is 96% used (3.90 GiB free)",
                           "Disk almost full: /srv/media is 92% used (7.66 GiB free)"])
-        # Each line was complete when it entered the live region, so that a screen reader reads it once.
         self.assertEqual(after["bannerAdded"], [[line["cls"], line["text"]] for line in after["banner"]["lines"]])
 
     def test_critical_is_red_and_warning_orange(self):
@@ -169,14 +175,50 @@ class Banner(NodeTest):
         self.assertEqual(snaps[3]["bannerChanges"], 1)  # only the text of the line that changed
         self.assertEqual(snaps[3]["banner"]["lines"][0]["text"], f"Disk almost full: {TRAP} is 96% used (3.89 GiB free)")
 
-    def test_the_banner_is_a_polite_live_region_never_hidden(self):
+    def test_only_a_hidden_summary_is_a_live_region(self):
+        """During a download, the free space of a line changes nearly every second: as a live region, the banner
+        was read out again and again. Its lines are no longer live; screen readers read a hidden summary."""
         for snap in self.run_page([{"live": ALERTS}, {"live": CALM}]):
             self.assertEqual((snap["banner"]["role"], snap["banner"]["live"], snap["banner"]["hidden"]),
-                             ("status", "polite", False))
+                             (None, None, False))
+            self.assertEqual((snap["summary"]["role"], snap["summary"]["live"], snap["summary"]["cls"]),
+                             ("status", "polite", "sr-only"))
+
+    def test_the_summary_names_the_disks_in_alert_and_their_level_only(self):
+        before, after = self.run_page([{"live": ALERTS}])
+        self.assertEqual(before["summary"]["text"], "")
+        self.assertEqual(after["summary"]["text"], f"Disk almost full, critical: {TRAP}; warning: /srv/media")
+
+    def test_the_summary_changes_only_when_a_disk_enters_leaves_or_changes_level(self):
+        red = {"/": disk("50.00"), "/srv/media": disk("96.50", "3.50 GiB", "critical"),
+               TRAP: disk("96.10", "3.90 GiB", "critical")}
+        snaps = self.run_page([
+            {"live": ALERTS},  # two disks enter the alert
+            {"live": dict(ALERTS, **{TRAP: disk("96.11", "3.89 GiB", "critical")})},  # only the free space moves
+            {"live": red},  # /srv/media goes from orange to red
+            {"live": dict(red, **{TRAP: disk("97.00", "3.00 GiB", "critical")})},  # the fullest one is another
+            {"live": dict(ALERTS, **{"/srv/media": disk("80.00", "20.00 GiB")})},  # /srv/media leaves the alert
+            {"live": CALM},  # the last one leaves
+            {"live": CALM},
+        ])
+        self.assertEqual([snap["summaryChanges"] for snap in snaps], [0, 1, 0, 1, 0, 1, 1, 0])
+        self.assertEqual([snap["summary"]["text"] for snap in snaps],
+                         ["", f"Disk almost full, critical: {TRAP}; warning: /srv/media",
+                          f"Disk almost full, critical: {TRAP}; warning: /srv/media",
+                          f"Disk almost full, critical: {TRAP}, /srv/media",
+                          f"Disk almost full, critical: {TRAP}, /srv/media",
+                          f"Disk almost full, critical: {TRAP}",
+                          "No disk is almost full anymore.", "No disk is almost full anymore."])
+        # The visible lines still follow every reading.
+        self.assertEqual(snaps[2]["banner"]["lines"][0]["text"], f"Disk almost full: {TRAP} is 96% used (3.89 GiB free)")
+        self.assertEqual([line["text"] for line in snaps[4]["banner"]["lines"]],
+                         [f"Disk almost full: {TRAP} is 97% used (3.00 GiB free)",
+                          "Disk almost full: /srv/media is 96% used (3.50 GiB free)"])
 
     def test_no_disk_info_card_no_banner(self):
         snaps = self.run_page([{"live": ALERTS}], user="friend", quota=True)
         self.assertIsNone(snaps[1]["banner"])
+        self.assertIsNone(snaps[1]["summary"])
         self.assertEqual(snaps[1]["disks"], {})
 
 
@@ -217,6 +259,22 @@ class Poll(NodeTest):
     def test_the_poll_stops_at_its_next_turn_once_live(self):
         snaps = self.run_page([{"ajax": {"/": polled("50.00")}}, {"live": ALERTS}, {"timer": True}], poll=True)
         self.assertEqual((snaps[-1]["requests"], snaps[-1]["timers"]), (1, 0))
+
+    def test_a_mount_without_dev_device_keeps_its_numbers_once_live(self):
+        """ZFS, NFS...: filled by /stats/disk when the page loads, then by every live reading (they were marked
+        UNAVAILABLE by the first one). They have no read and write speeds."""
+        tank = dict(disk("95.00", "51.20 GiB", "critical"), read=None, write=None)  # what the server sends
+        snaps = self.run_page([{"ajax": {"/srv/media": polled("95.00", "51.20 GiB", "critical")}},
+                               {"live": {"/": disk("50.00"), "/srv/media": tank, TRAP: disk("50.00")}},
+                               {"live": {"/": disk("50.00"), "/srv/media": tank, TRAP: disk("50.00")}}], poll=True)
+        for snap in snaps[1:]:
+            shown = snap["disks"]["/srv/media"]
+            self.assertEqual((shown["free"], shown["percent"], shown["bar"], shown["badge"]),
+                             ("51.20 GiB", "95.00", ["bg-danger"], ["bg-danger"]))
+        self.assertEqual((snaps[2]["disks"]["/srv/media"]["read"], snaps[2]["disks"]["/srv/media"]["write"]),
+                         ("—", "—"))
+        self.assertEqual([line["text"] for line in snaps[3]["banner"]["lines"]],
+                         ["Disk almost full: /srv/media is 95% used (51.20 GiB free)"])
 
     def test_without_socketio_the_poll_keeps_filling_the_card(self):
         snaps = self.run_page([

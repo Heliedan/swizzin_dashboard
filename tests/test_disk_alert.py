@@ -191,7 +191,7 @@ class LiveEvent(unittest.TestCase):
         with mock.patch.dict(swizzin.app.config, config), fake_disks(percents), \
                 mock.patch.object(live_stats.os.path, "ismount", return_value=True), \
                 mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
-                mock.patch.object(live_stats, "_peripheriques", return_value=devs), \
+                mock.patch.object(live_stats, "peripheriques", return_value=devs), \
                 mock.patch.object(live_stats, "_cpu", side_effect=[CPU_A, CPU_B]), \
                 mock.patch.object(live_stats, "_disques", return_value={}):
             with self.assertRaises(Stop):
@@ -235,6 +235,7 @@ class StatsRoute(unittest.TestCase):
         client = swizzin.app.test_client()
         with mock.patch.dict(swizzin.app.config, config), \
                 mock.patch.object(swizzin, "get_mounts", return_value=list(percents)), \
+                mock.patch.object(swizzin, "peripheriques", side_effect=lambda ms: dict.fromkeys(ms, "sda")), \
                 mock.patch.object(swizzin, "disk_usage", side_effect=lambda m: ("1 GiB", "1 GiB", "1 GiB", percents[m])):
             r = client.get("/stats/disk", headers=auth("tester"))
         self.assertEqual(r.status_code, 200)
@@ -265,10 +266,14 @@ class Page(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         return r.get_data(as_text=True)
 
-    def test_the_banner_is_an_empty_live_region_until_a_disk_fills_up(self):
-        """Always there and empty (not hidden): screen readers then read what appears in it."""
+    def test_only_the_summary_of_the_banner_is_a_live_region(self):
+        """The summary is always there and empty (not hidden from screen readers): they read what appears in it.
+        The visible lines change nearly every second during a download: they are not a live region."""
         page = self.get_dashboard("tester", ["/"])
-        self.assertIn('<div id="alerte-disque" role="status" aria-live="polite"></div>', page)
+        self.assertIn('<div id="alerte-disque"></div>\n'
+                      '        <div id="alerte-disque-resume" class="sr-only" role="status" aria-live="polite"></div>',
+                      page)
+        self.assertEqual(page.count("aria-live"), 1)
         self.assertIn('id="carte-disque"', page)
 
     def test_the_minute_poll_stops_only_once_the_live_card_has_data(self):
@@ -286,6 +291,7 @@ class Page(unittest.TestCase):
                 page = self.get_dashboard(user, ["/"], quota)
                 self.assertEqual('id="carte-disque"' in page, shown)
                 self.assertEqual('id="alerte-disque"' in page, shown)
+                self.assertEqual('id="alerte-disque-resume"' in page, shown)
 
     def test_a_trapped_mount_path_is_escaped(self):
         page = self.get_dashboard("tester", ["/", TRAP])

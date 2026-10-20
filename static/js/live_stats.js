@@ -142,8 +142,8 @@
       texte(m + 'diskfree', x.diskfree);
       texte(m + 'disktotal', x.disktotal);
       texte(m + 'diskpercent', x.perutil);
-      texte(m + 'diskread', x.read);
-      texte(m + 'diskwrite', x.write);
+      texte(m + 'diskread', x.read || '—');  // pas de débits sans périphérique /dev/ (ZFS, NFS...)
+      texte(m + 'diskwrite', x.write || '—');
       barre(document.getElementById(m + 'diskprogress'), x.perutil, couleurDisque(x.alert));
       var ind = document.getElementById(m + 'indicator');
       couleur(ind, Number(x.perutil), couleurDisque(x.alert));
@@ -155,11 +155,13 @@
   // Disk Info qui a atteint un seuil (avertissement en orange, critique en rouge). Il suit chaque relevé :
   // il apparaît et disparaît en direct. Le chemin de montage vient du système (espaces, caractères spéciaux) :
   // il n'est jamais inséré comme du HTML, seulement par textContent.
-  // Le bandeau est une zone role="status" aria-live="polite" (templates/index.html), toujours présente et vide quand
-  // aucun disque n'est en alerte : les lecteurs d'écran lisent ce qui y change. Un encart n'est donc touché que si
-  // son texte ou sa couleur change, pas à chaque relevé.
+  // Lecteurs d'écran : pendant un téléchargement, l'espace libre d'une ligne change presque chaque seconde. Les
+  // lignes visibles ne sont donc pas une zone « live ». Seul le résumé caché #alerte-disque-resume (role="status"
+  // aria-live="polite", templates/index.html) est lu : il ne nomme que les disques en alerte et leur niveau, il ne
+  // change que quand un disque entre en alerte, en sort ou change de niveau. Rien n'est touché sans changement.
   function alertes(d) {
     var bandeau = document.getElementById('alerte-disque');
+    var resume = document.getElementById('alerte-disque-resume');
     var carte = document.getElementById('carte-disque');
     if (!bandeau || !carte) { return; }  // pas de carte Disk Info pour cet utilisateur : pas de bandeau non plus
     var lignes = [];
@@ -168,7 +170,7 @@
       if (x.unavailable || (x.alert !== 'warning' && x.alert !== 'critical')) { return; }
       if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
       var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
-      lignes.push({ alerte: x.alert, pct: pct,
+      lignes.push({ m: m, alerte: x.alert, pct: pct,
                     texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
     });
     lignes.sort(function (a, b) { return b.pct - a.pct; });  // le disque le plus plein en premier
@@ -176,7 +178,7 @@
       // text-break : un chemin long sans espace passe à la ligne au lieu de déborder sur un téléphone.
       var classe = 'alert mt-3 mb-0 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
       var encart = bandeau.children[i];
-      if (!encart) {  // encart complet avant de l'ajouter : il est lu une seule fois
+      if (!encart) {
         encart = document.createElement('div');
         encart.className = classe;
         encart.textContent = l.texte;
@@ -189,6 +191,23 @@
     while (bandeau.children.length > lignes.length) {  // disques revenus sous le seuil, démontés ou illisibles
       bandeau.removeChild(bandeau.lastElementChild);
     }
+    if (resume) {
+      var phrase = resumer(lignes, resume.textContent);
+      if (resume.textContent !== phrase) { resume.textContent = phrase; }
+    }
+  }
+
+  // Résumé pour les lecteurs d'écran : les disques rouges puis orange, chacun dans l'ordre des chemins (l'ordre
+  // du remplissage changerait sans qu'aucun niveau ne change). Ni pourcentage ni espace libre. Vide tant
+  // qu'aucun disque n'a été en alerte ; quand le dernier en sort, il le dit.
+  function resumer(lignes, avant) {
+    var niveaux = { critical: [], warning: [] };
+    lignes.forEach(function (l) { niveaux[l.alerte].push(l.m); });
+    var parties = [];
+    if (niveaux.critical.length) { parties.push('critical: ' + niveaux.critical.sort().join(', ')); }
+    if (niveaux.warning.length) { parties.push('warning: ' + niveaux.warning.sort().join(', ')); }
+    if (parties.length) { return 'Disk almost full, ' + parties.join('; '); }
+    return avant ? 'No disk is almost full anymore.' : '';
   }
 
   document.addEventListener('DOMContentLoaded', function () {

@@ -60,6 +60,22 @@ def in_this_system(pid, proc="/proc"):
         return True  # cannot tell: counted
 
 
+def zombie(pid, proc="/proc"):
+    """True for a process that has ended but that its parent has not collected yet (state Z): it holds no lock.
+
+    Every thread must be Z: when only the main thread has ended, the process shows Z (ps: Zl) while its other
+    threads still run, and it may still hold a lock."""
+    try:
+        tasks = os.listdir("%s/%s/task" % (proc, pid))
+        for task in tasks:
+            with open("%s/%s/task/%s/stat" % (proc, pid, task)) as f:
+                if f.read().rpartition(")")[2].split()[0] != "Z":  # after the name, which may hold ")" or spaces
+                    return False
+        return bool(tasks)
+    except (OSError, IndexError):
+        return False  # cannot tell: counted
+
+
 def copy_error(e):
     """Why a copy failed, in words (not "[Errno 28] ...")."""
     if isinstance(e, OSError) and e.errno in (errno.ENOSPC, errno.EDQUOT):
@@ -315,7 +331,7 @@ class Removal:
                         name = f.read().strip()
                 except OSError:
                     continue
-                if name in APT_PROCESSES:
+                if name in APT_PROCESSES and not zombie(pid):
                     return "%s is running" % name
         return None
 

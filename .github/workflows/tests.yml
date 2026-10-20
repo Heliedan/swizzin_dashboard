@@ -43,6 +43,9 @@ jobs:
       - name: Run the tests
         env:
           SWIZZIN_SRC: swizzin-src
+          # Without node, tests/test_disk_alert_js.py fails here instead of
+          # skipping its tests in silence (on a computer, they are skipped).
+          REQUIRE_NODE: "1"
         run: |
           failed=""
           for test in tests/test_*.py; do

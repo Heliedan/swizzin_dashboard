@@ -36,8 +36,9 @@ docker run -d --name swz-base --hostname swz-base --cgroupns=private --security-
 docker exec swz-base bash -c 'curl -fsSL https://s5n.sh -o /root/setup.sh &&
   bash /root/setup.sh --unattend --user test --pass Essai-Swz-2026 --skip-cracklib nginx panel'
 
-# this repository's panel and App Store (run from the repository root)
-git archive HEAD | docker exec -i swz-base bash -c 'mkdir -p /root/fork && tar -x -C /root/fork'
+# this repository's panel and App Store (run from the repository root). git archive writes its files
+# writable by the group (664), and store-helper/install.sh refuses files that another user could change.
+git archive HEAD | docker exec -i swz-base bash -c 'mkdir -p /root/fork && tar -x -C /root/fork && chmod -R go-w /root/fork'
 docker exec swz-base bash -c 'cd /root/fork && cp -a swizzin.py /opt/swizzin/ && cp -a core static templates /opt/swizzin/ &&
   chown -R swizzin:swizzin /opt/swizzin && bash store-helper/install.sh && systemctl restart panel'
 
