@@ -37,6 +37,19 @@ In the live Disk Info card, **each disk has its own light box** with its read/wr
 
 Disks with a `/dev/` device are read as before, directly: the kernel answers for them at once.
 
+<a id="stats-disk"></a>**For scripts that call `/stats/disk`** (with the panel login): it answers one entry per mount of the Disk Info card, with `disktotal`, `diskused`, `diskfree` (text such as `"11.20 GiB"`, or `"12.03 GB"` with `DISK_UNITS = "si"`), `perutil` (the percentage used, computed like `df`, as text with two decimals such as `"92.34"`) and, new in this edition, **`alert`**: the level of the disk almost full alert, with the thresholds of `swizzin.cfg`.
+
+- `"critical"`: `perutil` is at or above `DISK_CRIT_PERCENT` (red, default 95);
+- `"warning"`: `perutil` is at or above `DISK_WARN_PERCENT` (orange, default 90), but not critical;
+- `null`: neither: below the thresholds, or the level it reached is turned off (0).
+
+```json
+{"/": {"disktotal": "100.00 GiB", "diskused": "50.00 GiB", "diskfree": "50.00 GiB", "perutil": "50.00", "alert": null},
+ "/mnt/data": {"disktotal": "100.00 GiB", "diskused": "92.34 GiB", "diskfree": "7.66 GiB", "perutil": "92.34", "alert": "warning"}}
+```
+
+A mount that cannot be read, or that has not answered within 5 seconds, is left out.
+
 ### App Store
 
 ![The App Store page: applications installed, available, greyed out with the reason, or with a note](docs/screenshots/store-catalogue.png)
