@@ -346,6 +346,10 @@ appstatus();
 })();
 
 (function diskusage() {
+  {# 2026-10-20 : la carte Disk Info en direct (static/js/live_stats.js) met déjà les disques à jour chaque seconde,
+     avec la couleur de l'alerte « disque bientôt plein ». Ce relevé de chaque minute la repeindrait
+     avec ses propres seuils (rouge au-dessus de 90 %). #}
+  if (document.getElementById('carte-disque')) { return; }
   $.ajax({
     url: "{{ url_for('disk_free') }}",
     statusCode: {
