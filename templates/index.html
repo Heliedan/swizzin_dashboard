@@ -23,7 +23,7 @@
          carte Disk Info : qui ne voit pas la carte ne voit pas le bandeau. Voir le README. #}
       {% set carte_disque = (quota == False or config.ADMIN_USER == user) %}
       {% if carte_disque %}
-        <div id="alerte-disque" class="mt-3" hidden></div>
+        <div id="alerte-disque" role="status" aria-live="polite"></div>
       {% endif %}
       <div class="card-columns live-layout">
           {# 2026-10-09 : CPU Info (ex-System Info), RAM Info puis Disk Info, groupées et actualisées chaque seconde ;

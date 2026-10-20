@@ -155,8 +155,9 @@
   // Disk Info qui a atteint un seuil (avertissement en orange, critique en rouge). Il suit chaque relevé :
   // il apparaît et disparaît en direct. Le chemin de montage vient du système (espaces, caractères spéciaux) :
   // il n'est jamais inséré comme du HTML, seulement par textContent.
-  var dernierBandeau = null;
-
+  // Le bandeau est une zone role="status" aria-live="polite" (templates/index.html), toujours présente et vide quand
+  // aucun disque n'est en alerte : les lecteurs d'écran lisent ce qui y change. Un encart n'est donc touché que si
+  // son texte ou sa couleur change, pas à chaque relevé.
   function alertes(d) {
     var bandeau = document.getElementById('alerte-disque');
     var carte = document.getElementById('carte-disque');
@@ -171,18 +172,23 @@
                     texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
     });
     lignes.sort(function (a, b) { return b.pct - a.pct; });  // le disque le plus plein en premier
-    var cle = JSON.stringify(lignes);
-    if (cle === dernierBandeau) { return; }  // rien de changé depuis le relevé précédent
-    dernierBandeau = cle;
-    bandeau.textContent = '';
-    lignes.forEach(function (l) {
-      var encart = document.createElement('div');
+    lignes.forEach(function (l, i) {
       // text-break : un chemin long sans espace passe à la ligne au lieu de déborder sur un téléphone.
-      encart.className = 'alert mb-2 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
-      encart.textContent = l.texte;
-      bandeau.appendChild(encart);
+      var classe = 'alert mt-3 mb-0 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
+      var encart = bandeau.children[i];
+      if (!encart) {  // encart complet avant de l'ajouter : il est lu une seule fois
+        encart = document.createElement('div');
+        encart.className = classe;
+        encart.textContent = l.texte;
+        bandeau.appendChild(encart);
+        return;
+      }
+      if (encart.className !== classe) { encart.className = classe; }
+      if (encart.textContent !== l.texte) { encart.textContent = l.texte; }
     });
-    bandeau.hidden = lignes.length === 0;
+    while (bandeau.children.length > lignes.length) {  // disques revenus sous le seuil, démontés ou illisibles
+      bandeau.removeChild(bandeau.lastElementChild);
+    }
   }
 
   document.addEventListener('DOMContentLoaded', function () {

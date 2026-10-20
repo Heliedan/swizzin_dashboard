@@ -265,9 +265,10 @@ class Page(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         return r.get_data(as_text=True)
 
-    def test_the_banner_is_there_hidden_until_a_disk_fills_up(self):
+    def test_the_banner_is_an_empty_live_region_until_a_disk_fills_up(self):
+        """Always there and empty (not hidden): screen readers then read what appears in it."""
         page = self.get_dashboard("tester", ["/"])
-        self.assertIn('<div id="alerte-disque" class="mt-3" hidden></div>', page)
+        self.assertIn('<div id="alerte-disque" role="status" aria-live="polite"></div>', page)
         self.assertIn('id="carte-disque"', page)
 
     def test_the_minute_poll_stops_only_once_the_live_card_has_data(self):
@@ -318,7 +319,7 @@ class Script(unittest.TestCase):
 
     def test_a_long_mount_path_wraps_inside_the_banner(self):
         """A long path with no space ran out of the banner on a phone, hiding which disk is full."""
-        self.assertRegex(self.banner, r"encart\.className = 'alert mb-2 text-break ' \+")
+        self.assertIn("var classe = 'alert mt-3 mb-0 text-break ' +", self.banner)
 
     def test_only_disks_of_the_card_raise_the_banner(self):
         """No Disk Info card (rights): no banner; a disk missing from the card does not show either."""
