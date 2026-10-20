@@ -174,7 +174,8 @@
     bandeau.textContent = '';
     lignes.forEach(function (l) {
       var encart = document.createElement('div');
-      encart.className = 'alert mb-2 ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
+      // text-break : un chemin long sans espace passe à la ligne au lieu de déborder sur un téléphone.
+      encart.className = 'alert mb-2 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
       encart.textContent = l.texte;
       bandeau.appendChild(encart);
     });

@@ -237,6 +237,10 @@ class Script(unittest.TestCase):
                 self.assertNotIn(sink, self.js)
         self.assertIn("encart.textContent = l.texte;", self.banner)
 
+    def test_a_long_mount_path_wraps_inside_the_banner(self):
+        """A long path with no space ran out of the banner on a phone, hiding which disk is full."""
+        self.assertRegex(self.banner, r"encart\.className = 'alert mb-2 text-break ' \+")
+
     def test_only_disks_of_the_card_raise_the_banner(self):
         """No Disk Info card (rights): no banner; a disk missing from the card does not show either."""
         self.assertIn("if (!bandeau || !carte) { return; }", self.banner)
