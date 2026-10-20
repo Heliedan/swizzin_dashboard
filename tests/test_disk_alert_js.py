@@ -1,7 +1,8 @@
 """The disk banner, the disk bars and the /stats/disk poll, run for real in Node.js.
 
 static/js/live_stats.js and the diskusage() poll of the dashboard run on the HTML the panel renders, in a small
-fake DOM (tests/fake_dom.js): no npm package to install. Skipped when node is not installed.
+fake DOM (tests/fake_dom.js): no npm package to install. Skipped when node is not installed, except with
+REQUIRE_NODE=1, set by the automatic tests (.github/workflows/tests.yml): there, a missing node fails them.
 
 Run from the repository root: python tests/test_disk_alert_js.py
 (uses a throwaway htpasswd file and fake disks: nothing on the machine is touched)."""
@@ -34,6 +35,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
 import swizzin  # noqa: E402
 
 NODE = shutil.which("node")
+NODE_REQUIRED = os.environ.get("REQUIRE_NODE") == "1"  # the automatic tests: never skipped in silence
 FAKE_DOM = os.path.join(ROOT, "tests", "fake_dom.js")
 LIVE_STATS = os.path.join(ROOT, "static", "js", "live_stats.js")
 TRAP = "/mnt/<img src=x onerror=alert(1)> it's \"mine\" & yours"
@@ -93,8 +95,13 @@ def dashboard(user, mounts, quota):
     return r.get_data(as_text=True)
 
 
-@unittest.skipUnless(NODE, "node is not installed")
+@unittest.skipUnless(NODE or NODE_REQUIRED, "node is not installed")
 class NodeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not NODE:
+            raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
+
     def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False):
         """Loads the dashboard in the fake DOM, plays the steps; returns a snapshot after loading and after each."""
         page = dashboard(user, mounts, quota)

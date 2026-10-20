@@ -48,7 +48,8 @@ Each test file runs on its own, in its own Python process.
 Every file must end with `OK`.
 If `tests/test_removable.py` ends with `OK (skipped=...)`, it did not find Swizzin: check `SWIZZIN_SRC`.
 `tests/test_disk_alert_js.py` runs the dashboard's disk scripts in Node.js (the `node` command, no npm package).
-Without `node`, it ends with `OK (skipped=14)`: install Node.js to run it (the automatic tests have it).
+Without `node`, its tests are skipped and it ends with `OK (skipped=...)`: install Node.js to run them.
+The automatic tests set `REQUIRE_NODE=1`: there, a missing `node` makes it fail instead.
 The tests do not need root: run them as a normal user.
 As root, `tests/test_store_helper.py` ends with `OK (skipped=2)`: the helper always lets root in,
 so the two tests of refused connections cannot run.
