@@ -78,6 +78,25 @@ class Thresholds(unittest.TestCase):
         self.assertEqual(live_stats.lire_seuils(cfg, journal), (0, 0))
         journal.warning.assert_not_called()
 
+    def test_warning_not_below_critical_turns_orange_off(self):
+        """Orange from 96 % and red from 95 %: orange could never show. It is turned off, and the log says why."""
+        for warn, crit in ((96, 95), (95, 95), ("ninety", 85)):
+            with self.subTest(warn=warn, crit=crit):
+                journal = mock.Mock()
+                cfg = {"DISK_WARN_PERCENT": warn, "DISK_CRIT_PERCENT": crit}
+                self.assertEqual(live_stats.lire_seuils(cfg, journal), (0, crit))
+                self.assertIn("DISK_WARN_PERCENT", journal.warning.call_args.args[0])
+                self.assertIn("orange", journal.warning.call_args.args[0])
+
+    def test_a_level_turned_off_is_not_an_inversion(self):
+        for cfg, expected in (({"DISK_WARN_PERCENT": 96, "DISK_CRIT_PERCENT": 0}, (96, 0)),
+                              ({"DISK_WARN_PERCENT": 0, "DISK_CRIT_PERCENT": 50}, (0, 50)),
+                              ({"DISK_WARN_PERCENT": 94.99, "DISK_CRIT_PERCENT": 95}, (94.99, 95))):
+            with self.subTest(cfg=cfg):
+                journal = mock.Mock()
+                self.assertEqual(live_stats.lire_seuils(cfg, journal), expected)
+                journal.warning.assert_not_called()
+
     def test_the_panel_starts_with_invalid_settings(self):
         """swizzin.cfg of this test holds invalid values: the panel started, and uses the defaults."""
         self.assertEqual(swizzin.app.config["DISK_WARN_PERCENT"], "ninety")
@@ -187,6 +206,13 @@ class LiveEvent(unittest.TestCase):
         self.assertEqual((event, namespace), ("live", "/websocket"))
         self.assertEqual({m: d["alert"] for m, d in data["disks"].items()},
                          {"/": None, "/data": "warning", "/media": "critical"})
+
+    def test_swapped_thresholds_keep_red_only(self):
+        with self.assertLogs(swizzin.app.logger, "WARNING"):
+            sent = self.run_thread({"DISK_WARN_PERCENT": 96, "DISK_CRIT_PERCENT": 95},
+                                   {"/": "94.99", "/data": "95.00", "/media": "97.00"})
+        self.assertEqual({m: d["alert"] for m, d in sent[0][1]["disks"].items()},
+                         {"/": None, "/data": "critical", "/media": "critical"})
 
     def test_zero_turns_the_alert_off(self):
         sent = self.run_thread({"DISK_WARN_PERCENT": 0, "DISK_CRIT_PERCENT": 0}, {"/": "100.00"})

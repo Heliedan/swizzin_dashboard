@@ -18,7 +18,9 @@ def lire_seuils(config, journal=None):
     """(avertissement, critique) en % depuis swizzin.cfg (DISK_WARN_PERCENT, DISK_CRIT_PERCENT).
 
     0 coupe ce niveau d'alerte. Une valeur invalide (texte, négative, plus de 100...) reprend le défaut,
-    avec un avertissement dans le journal : un réglage mal écrit ne doit pas empêcher le panel de démarrer."""
+    avec un avertissement dans le journal : un réglage mal écrit ne doit pas empêcher le panel de démarrer.
+    Un avertissement supérieur ou égal au critique ne se verrait jamais : l'orange est coupé, le rouge reste,
+    avec un avertissement dans le journal."""
     out = []
     for cle, defaut in zip(('DISK_WARN_PERCENT', 'DISK_CRIT_PERCENT'), SEUILS_DEFAUT):
         valeur = config.get(cle, defaut)
@@ -34,7 +36,13 @@ def lire_seuils(config, journal=None):
                                 cle, valeur, defaut)
             seuil = defaut
         out.append(seuil)
-    return tuple(out)
+    avertissement, critique = out
+    if avertissement and critique and avertissement >= critique:
+        if journal is not None:
+            journal.warning("swizzin.cfg : DISK_WARN_PERCENT (%g) n'est pas sous DISK_CRIT_PERCENT (%g) : "
+                            "alerte orange coupée, rouge dès %g %%", avertissement, critique, critique)
+        avertissement = 0
+    return avertissement, critique
 
 
 def niveau_alerte(pct, seuils):
