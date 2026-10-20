@@ -228,6 +228,27 @@ class LiveEvent(unittest.TestCase):
         self.assertIn("DISK_CRIT_PERCENT", log.output[1])
 
 
+class StatsRoute(unittest.TestCase):
+    """/stats/disk, polled until the live card takes over, carries the same level: both paint a disk alike."""
+
+    def get_levels(self, config, percents):
+        client = swizzin.app.test_client()
+        with mock.patch.dict(swizzin.app.config, config), \
+                mock.patch.object(swizzin, "get_mounts", return_value=list(percents)), \
+                mock.patch.object(swizzin, "disk_usage", side_effect=lambda m: ("1 GiB", "1 GiB", "1 GiB", percents[m])):
+            r = client.get("/stats/disk", headers=auth("tester"))
+        self.assertEqual(r.status_code, 200)
+        return {m: d["alert"] for m, d in r.get_json().items()}
+
+    def test_default_thresholds(self):  # swizzin.cfg of this test is invalid: defaults
+        self.assertEqual(self.get_levels({}, {"/": "89.99", "/a": "90.00", "/b": "95.00"}),
+                         {"/": None, "/a": "warning", "/b": "critical"})
+
+    def test_thresholds_of_swizzin_cfg(self):
+        self.assertEqual(self.get_levels({"DISK_WARN_PERCENT": 50, "DISK_CRIT_PERCENT": 0}, {"/": "49.99", "/a": "99.00"}),
+                         {"/": None, "/a": "warning"})
+
+
 class Page(unittest.TestCase):
     """The banner has the same rights as the Disk Info card, and a mount path cannot inject HTML."""
 

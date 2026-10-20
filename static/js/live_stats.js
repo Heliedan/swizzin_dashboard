@@ -1,13 +1,14 @@
 /* 2026-10-09 : met à jour chaque seconde les cartes CPU Info, RAM Info et Disk Info (événement « live » du websocket).
-   Mêmes identifiants et mêmes seuils (75 % / 90 %) que les scripts d'origine du panel (templates/macros.html).
-   2026-10-20 : bandeau « disque bientôt plein » ; un disque en alerte prend la couleur de l'alerte.
-   Voir le README. */
+   Mêmes identifiants et, pour CPU et RAM, mêmes seuils (75 % / 90 %) que les scripts d'origine du panel
+   (templates/macros.html).
+   2026-10-20 : bandeau « disque bientôt plein ». Les disques prennent la couleur de leur niveau d'alerte, avec les
+   seuils DISK_WARN_PERCENT et DISK_CRIT_PERCENT de swizzin.cfg. Voir le README. */
 (function () {
   'use strict';
 
   function niveau(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
 
-  // classe : couleur imposée (alerte disque), sinon celle des seuils 75 % / 90 %.
+  // classe : couleur imposée (disques), sinon celle des seuils 75 % / 90 % (CPU, RAM).
   function couleur(el, pct, classe) {
     if (!el) { return; }
     el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'disk-unavailable');
@@ -22,9 +23,10 @@
     couleur(el, p, classe);
   }
 
-  // Niveau d'alerte « disque bientôt plein » calculé par le serveur (seuils de swizzin.cfg) → couleur Bootstrap.
-  function classeAlerte(alerte) {
-    return alerte === 'critical' ? 'bg-danger' : (alerte === 'warning' ? 'bg-warning' : null);
+  // Couleur d'un disque : celle de son niveau d'alerte, calculé par le serveur avec DISK_WARN_PERCENT et
+  // DISK_CRIT_PERCENT (swizzin.cfg). Mêmes seuils et mêmes couleurs que le bandeau, pas l'échelle 75 % / 90 %.
+  function couleurDisque(alerte) {
+    return alerte === 'critical' ? 'bg-danger' : (alerte === 'warning' ? 'bg-warning' : 'bg-success');
   }
 
   function texte(id, valeur) {
@@ -140,10 +142,9 @@
       texte(m + 'diskpercent', x.perutil);
       texte(m + 'diskread', x.read);
       texte(m + 'diskwrite', x.write);
-      // Disque en alerte : la barre et la pastille prennent la couleur du bandeau (orange ou rouge).
-      barre(document.getElementById(m + 'diskprogress'), x.perutil, classeAlerte(x.alert));
+      barre(document.getElementById(m + 'diskprogress'), x.perutil, couleurDisque(x.alert));
       var ind = document.getElementById(m + 'indicator');
-      couleur(ind, Number(x.perutil), classeAlerte(x.alert));
+      couleur(ind, Number(x.perutil), couleurDisque(x.alert));
       if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // au survol : le remplissage en clair
     });
   }
@@ -161,7 +162,7 @@
     var lignes = [];
     Object.keys(d).forEach(function (m) {
       var x = d[m];
-      if (x.unavailable || !classeAlerte(x.alert)) { return; }
+      if (x.unavailable || (x.alert !== 'warning' && x.alert !== 'critical')) { return; }
       if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
       var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
       lignes.push({ alerte: x.alert, pct: pct,

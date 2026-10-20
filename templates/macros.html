@@ -364,16 +364,11 @@ appstatus();
         $("#"+$.escapeSelector(mount)+"diskused").html(data[mount]['diskused']);
         $("#"+$.escapeSelector(mount)+"disktotal").html(data[mount]['disktotal']);
         $("#"+$.escapeSelector(mount)+"diskpercent").html(data[mount]['perutil']);
-        if (Number(data[mount]['perutil']) > 90) {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-danger").removeClass("bg-success bg-warning");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-danger").removeClass("bg-success bg-warning");
-        } else if (Number(data[mount]['perutil']) > 75) {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-warning").removeClass("bg-success bg-danger");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-warning").removeClass("bg-success bg-danger");
-        } else {
-          $("#"+$.escapeSelector(mount)+"indicator.systemindicator").addClass("bg-success").removeClass("bg-warning bg-danger");
-          $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).addClass("bg-success").removeClass("bg-danger bg-warning");
-        }
+        {# 2026-10-20 : couleur du niveau d'alerte calculé par le serveur avec DISK_WARN_PERCENT et DISK_CRIT_PERCENT
+           (swizzin.cfg), comme la carte en direct et le bandeau « disque bientôt plein », au lieu de 75 % / 90 %. #}
+        var color = data[mount]['alert'] === 'critical' ? 'bg-danger' : (data[mount]['alert'] === 'warning' ? 'bg-warning' : 'bg-success');
+        $("#"+$.escapeSelector(mount)+"indicator.systemindicator").removeClass("bg-secondary bg-success bg-warning bg-danger").addClass(color);
+        $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).removeClass("bg-success bg-warning bg-danger").addClass(color);
       }
       setTimeout(function() {
         diskusage();
