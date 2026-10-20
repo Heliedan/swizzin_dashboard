@@ -119,6 +119,8 @@ class Banner(NodeTest):
         self.assertEqual([line["text"] for line in after["banner"]["lines"]],
                          [f"Disk almost full: {TRAP} is 96% used (3.90 GiB free)",
                           "Disk almost full: /srv/media is 92% used (7.66 GiB free)"])
+        # Each line was complete when it entered the live region, so that a screen reader reads it once.
+        self.assertEqual(after["bannerAdded"], [[line["cls"], line["text"]] for line in after["banner"]["lines"]])
 
     def test_critical_is_red_and_warning_orange(self):
         lines = self.run_page([{"live": ALERTS}])[1]["banner"]["lines"]
@@ -204,6 +206,8 @@ class Poll(NodeTest):
         self.assertEqual((loaded["requests"], loaded["liveMark"]), (1, False))
         self.assertEqual(answered["disks"]["/srv/media"]["free"], "7.66 GiB")
         self.assertEqual(answered["disks"]["/srv/media"]["bar"], ["bg-warning"])  # same colours as the live card
+        self.assertEqual(answered["disks"]["/srv/media"]["badge"], ["bg-warning"])
+        self.assertEqual(answered["disks"]["/srv/media"]["width"], "92%")
         self.assertEqual((answered["timers"], again["requests"]), (1, 2))  # no live reading yet: it polls again
         self.assertTrue(live["liveMark"])
         self.assertEqual(late["disks"]["/srv/media"]["free"], "7.66 GiB")  # the late answer paints nothing
@@ -224,6 +228,8 @@ class Poll(NodeTest):
         self.assertEqual(snaps[1]["disks"]["/srv/media"]["free"], "50.00 GiB")
         self.assertEqual(snaps[3]["disks"]["/srv/media"]["free"], "5.00 GiB")
         self.assertEqual(snaps[3]["disks"]["/srv/media"]["bar"], ["bg-danger"])
+        self.assertEqual(snaps[3]["disks"]["/srv/media"]["badge"], ["bg-danger"])
+        self.assertEqual(snaps[3]["disks"]["/srv/media"]["width"], "95%")
         self.assertEqual((snaps[4]["requests"], snaps[4]["liveMark"]), (3, False))
 
 

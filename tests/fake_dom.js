@@ -13,6 +13,7 @@ const fs = require('fs');
 const vm = require('vm');
 
 let changes = [];  // every change made to the page during the current step: the node changed
+let added = [];  // every node added during the current step, as it was when added: {parent, cls, text}
 
 class Text {
   constructor(value) { this.nodeType = 3; this.value = value; this.parentNode = null; }
@@ -90,6 +91,7 @@ class Element {
 
 function adopt(parent, node, index) {
   if (node.parentNode) { node.parentNode.removeChild(node); }
+  added.push({ parent, cls: node.nodeType === 1 ? node.className : null, text: node.textContent });
   node.parentNode = parent;
   parent.childNodes.splice(index, 0, node);
   changes.push(parent);
@@ -184,10 +186,12 @@ function snapshot() {
         ? { cls: n.className, text: n.textContent, elements: n.children.length } : { stray: n.textContent }),
     },
     bannerChanges: banner ? changes.filter(n => banner.contains(n)).length : 0,
+    bannerAdded: banner ? added.filter(a => a.parent === banner).map(a => [a.cls, a.text]) : [],
     disks, liveMark: card ? card.hasAttribute('data-direct') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
   };
   changes = [];
+  added = [];
   return snap;
 }
 
