@@ -215,6 +215,24 @@ class Banner(NodeTest):
                          [f"Disk almost full: {TRAP} is 97% used (3.00 GiB free)",
                           "Disk almost full: /srv/media is 96% used (3.50 GiB free)"])
 
+    def test_a_disk_in_alert_that_becomes_unavailable_is_not_said_to_be_full_no_more(self):
+        """Unreadable (a dead network share...), it may still be full: the summary does not say it no longer is."""
+        calm = {"/": disk("50.00"), "/srv/media": disk("50.00")}
+        snaps = self.run_page([
+            {"live": dict(calm, **{TRAP: {"unavailable": True}})},  # no alert yet: nothing to say
+            {"live": dict(calm, **{TRAP: disk("96.10", "3.90 GiB", "critical")})},
+            {"live": dict(calm, **{TRAP: {"unavailable": True}})},  # the last disk in alert
+            {"live": dict(calm, **{TRAP: {"unavailable": True}})},
+            {"live": dict(calm, **{TRAP: disk("50.00")})},  # readable again, below the thresholds
+        ])
+        self.assertEqual([snap["summary"]["text"] for snap in snaps],
+                         ["", "", f"Disk almost full, critical: {TRAP}",
+                          f"No readable disk is almost full anymore. Unavailable: {TRAP}.",
+                          f"No readable disk is almost full anymore. Unavailable: {TRAP}.",
+                          "No disk is almost full anymore."])
+        self.assertEqual([snap["summaryChanges"] for snap in snaps], [0, 0, 1, 1, 0, 1])
+        self.assertEqual(snaps[3]["banner"]["lines"], [])  # the visible banner leaves it, as before
+
     def test_no_disk_info_card_no_banner(self):
         snaps = self.run_page([{"live": ALERTS}], user="friend", quota=True)
         self.assertIsNone(snaps[1]["banner"])

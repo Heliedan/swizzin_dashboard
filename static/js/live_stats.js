@@ -159,16 +159,19 @@
   // lignes visibles ne sont donc pas une zone « live ». Seul le résumé caché #alerte-disque-resume (role="status"
   // aria-live="polite", templates/index.html) est lu : il ne nomme que les disques en alerte et leur niveau, il ne
   // change que quand un disque entre en alerte, en sort ou change de niveau. Rien n'est touché sans changement.
+  // Un disque illisible (UNAVAILABLE) quitte le bandeau, mais son remplissage est inconnu : il est peut-être
+  // toujours plein (partage réseau mort), le résumé ne dit donc jamais qu'il ne l'est plus.
   function alertes(d) {
     var bandeau = document.getElementById('alerte-disque');
     var resume = document.getElementById('alerte-disque-resume');
     var carte = document.getElementById('carte-disque');
     if (!bandeau || !carte) { return; }  // pas de carte Disk Info pour cet utilisateur : pas de bandeau non plus
-    var lignes = [];
+    var lignes = [], illisibles = [];
     Object.keys(d).forEach(function (m) {
       var x = d[m];
-      if (x.unavailable || (x.alert !== 'warning' && x.alert !== 'critical')) { return; }
       if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
+      if (x.unavailable) { illisibles.push(m); return; }
+      if (x.alert !== 'warning' && x.alert !== 'critical') { return; }
       var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
       lignes.push({ m: m, alerte: x.alert, pct: pct,
                     texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
@@ -192,22 +195,27 @@
       bandeau.removeChild(bandeau.lastElementChild);
     }
     if (resume) {
-      var phrase = resumer(lignes, resume.textContent);
+      var phrase = resumer(lignes, illisibles, resume.textContent);
       if (resume.textContent !== phrase) { resume.textContent = phrase; }
     }
   }
 
   // Résumé pour les lecteurs d'écran : les disques rouges puis orange, chacun dans l'ordre des chemins (l'ordre
   // du remplissage changerait sans qu'aucun niveau ne change). Ni pourcentage ni espace libre. Vide tant
-  // qu'aucun disque n'a été en alerte ; quand le dernier en sort, il le dit.
-  function resumer(lignes, avant) {
+  // qu'aucun disque n'a été en alerte ; quand le dernier en sort, il le dit, sauf pour les disques illisibles :
+  // ceux-là sont nommés, sans dire qu'ils ne sont plus pleins.
+  function resumer(lignes, illisibles, avant) {
     var niveaux = { critical: [], warning: [] };
     lignes.forEach(function (l) { niveaux[l.alerte].push(l.m); });
     var parties = [];
     if (niveaux.critical.length) { parties.push('critical: ' + niveaux.critical.sort().join(', ')); }
     if (niveaux.warning.length) { parties.push('warning: ' + niveaux.warning.sort().join(', ')); }
     if (parties.length) { return 'Disk almost full, ' + parties.join('; '); }
-    return avant ? 'No disk is almost full anymore.' : '';
+    if (!avant) { return ''; }
+    if (illisibles.length) {
+      return 'No readable disk is almost full anymore. Unavailable: ' + illisibles.sort().join(', ') + '.';
+    }
+    return 'No disk is almost full anymore.';
   }
 
   document.addEventListener('DOMContentLoaded', function () {
