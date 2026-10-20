@@ -560,6 +560,24 @@ class Pieces(unittest.TestCase):
             self.program("/usr/local/bin/apt-get")  # one that runs still counts
             self.assertEqual(self.r.apt_busy(), "apt-get is running")
 
+    def test_an_apt_whose_main_thread_ended_still_holds_this_server(self):
+        """Its main thread shows Z (ps: Zl) while another thread still runs: it has not ended, it may hold a lock."""
+        code = ("import ctypes, threading, time\n"
+                "libc = ctypes.CDLL(None)\n"
+                "libc.prctl(15, b'apt-get', 0, 0, 0)\n"  # PR_SET_NAME: the name in /proc/PID/comm
+                "threading.Thread(target=time.sleep, args=(60,)).start()\n"
+                "libc.pthread_exit(None)\n")  # the main thread ends, the other one goes on
+        p = subprocess.Popen([sys.executable, "-I", "-c", code])
+        self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
+        end = time.monotonic() + 10
+        while self.state(p.pid) != "Z" and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(self.state(p.pid), "Z")
+        self.assertGreater(len(os.listdir("/proc/%d/task" % p.pid)), 1)  # the other thread runs
+        with mock.patch.dict(os.environ, self.w.env()):
+            self.assertEqual(self.r.apt_busy(), "apt-get is running")
+
 
 if __name__ == "__main__":
     unittest.main()
