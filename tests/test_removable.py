@@ -1,7 +1,8 @@
 """The table of uninstallable apps (store-helper/removable.py) checked against Swizzin's own scripts.
 
 Needs a copy of Swizzin at the audited commit: SWIZZIN_SRC=/path/to/swizzin (a clone of
-github.com/swizzin/swizzin), or /etc/swizzin when it is readable. Skipped otherwise.
+github.com/swizzin/swizzin), or /etc/swizzin when it is readable. Skipped otherwise, except with
+REQUIRE_SWIZZIN_SRC=1, set by the automatic tests (.github/workflows/tests.yml): there, a missing copy fails them.
 Run: SWIZZIN_SRC=... /opt/.venv/swizzin/bin/python tests/test_removable.py
 """
 import hashlib
@@ -15,6 +16,7 @@ import removable  # noqa: E402
 
 SRC = os.environ.get("SWIZZIN_SRC") or "/etc/swizzin"
 HAVE_SRC = os.access(os.path.join(SRC, "scripts", "remove"), os.R_OK)
+SRC_REQUIRED = os.environ.get("REQUIRE_SWIZZIN_SRC") == "1"  # the automatic tests: never skipped in silence
 
 CATEGORIES = {
     "copied": "settings or data, saved in the copy before (a program folder that holds them included)",
@@ -291,9 +293,15 @@ class Table(unittest.TestCase):
                 re.compile(regex)
 
 
-@unittest.skipUnless(HAVE_SRC, "no copy of Swizzin (set SWIZZIN_SRC)")
+@unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
 class AgainstSwizzin(unittest.TestCase):
     """The table matches Swizzin at the audited commit."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not HAVE_SRC:
+            raise RuntimeError("no copy of Swizzin in SWIZZIN_SRC, and REQUIRE_SWIZZIN_SRC=1: these tests must run "
+                               "here (%s is not readable)" % os.path.join(SRC, "scripts", "remove"))
 
     def test_pins_match_swizzin(self):
         for rel, hashes in removable.PINS.items():

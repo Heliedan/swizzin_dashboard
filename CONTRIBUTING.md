@@ -47,6 +47,7 @@ for t in tests/test_*.py; do venv/bin/python "$t"; done
 Each test file runs on its own, in its own Python process.
 Every file must end with `OK`.
 If `tests/test_removable.py` ends with `OK (skipped=...)`, it did not find Swizzin: check `SWIZZIN_SRC`.
+The automatic tests set `REQUIRE_SWIZZIN_SRC=1`: there, a wrong `SWIZZIN_SRC` makes it fail instead.
 `tests/test_disk_alert_js.py` runs the dashboard's disk scripts in Node.js (the `node` command, no npm package).
 Without `node`, its tests are skipped and it ends with `OK (skipped=...)`: install Node.js to run them.
 The automatic tests set `REQUIRE_NODE=1`: there, a missing `node` makes it fail instead.
