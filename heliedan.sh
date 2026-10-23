@@ -43,7 +43,7 @@ checks() {
     [[ -x $PYTHON ]] || die "the panel's Python is missing ($PYTHON)"
 }
 
-edition_panel() { [[ -s $PANEL/$MARKER && ! -L $PANEL/$MARKER ]]; }  # as swizzin-store.service checks it
+edition_panel() { [[ -f $PANEL/$MARKER && -s $PANEL/$MARKER && ! -L $PANEL/$MARKER ]]; }  # as swizzin-store.service checks it
 
 store_installed() {  # any file of the App Store service, or the service still running
     local f
@@ -62,9 +62,8 @@ store_left() {  # what is left of the App Store service, in words (nothing: empt
     echo "${left[*]}"
 }
 
-store_busy() {  # an installation started from the App Store must never be cut off; any doubt counts as busy
-    systemctl is-active --quiet swizzin-store 2>/dev/null || return 1
-    [[ $(/usr/bin/python3 -I -c '
+store_job() {  # what the App Store service runs ("install sonarr"), "none", or nothing when it does not answer
+    /usr/bin/python3 -I -c '
 import json, socket, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect(sys.argv[1])
 s.sendall(b"{\"op\": \"catalogue\"}\n"); data = b""
@@ -72,7 +71,13 @@ while not data.endswith(b"\n"):
     chunk = s.recv(65536)
     if not chunk: break
     data += chunk
-print("idle" if json.loads(data).get("job") is None else "busy")' "$STORE_SOCKET" 2>/dev/null) != idle ]]
+job = json.loads(data).get("job")
+print("none" if job is None else "%s %s" % (job.get("action", "install"), job.get("app")))' "$STORE_SOCKET" 2>/dev/null || true
+}
+
+store_busy() {  # an installation started from the App Store must never be cut off; any doubt counts as busy
+    systemctl is-active --quiet swizzin-store 2>/dev/null || return 1
+    [[ $(store_job) != none ]]
 }
 
 remove_helper() {  # never stops on an error: install's failures go on to put the panel back (store_left says the rest)
@@ -83,6 +88,35 @@ remove_helper() {  # never stops on an error: install's failures go on to put th
     rm -rf "$STORE_UNIT.d" "$STORE_LIB" || true
     systemctl daemon-reload || true
     systemctl reset-failed swizzin-store >/dev/null 2>&1 || true
+}
+
+drop_helper() {  # install's failure paths: an installation started from the page meanwhile is never cut off
+    if store_busy; then
+        say "Warning: the App Store service is running a job (or does not answer), so it was left in place." \
+            "Once the job is over, remove it: sudo bash $0 remove-store"
+    else
+        remove_helper
+    fi
+}
+
+backup_panel() {  # the official panel, before the first switch: what revert puts back
+    if [[ -d $BACKUP/original && -f $BACKUP/original.info && $PANEL_LOCK -nt $BACKUP/original.info ]]; then
+        # box remove panel then box install panel since that backup: the panel to put back is this one now
+        local old
+        old="$BACKUP/replaced-$(date +%Y%m%d-%H%M%S)"
+        say "The panel was installed again since the backup in $BACKUP/original: that backup is set aside in $old"
+        mv "$BACKUP/original" "$old"
+        mv "$BACKUP/original.info" "$old.info"
+    fi
+    if [[ ! -d $BACKUP/original ]]; then
+        say "Backing up $PANEL to $BACKUP/original"
+        install -d -m 700 "$BACKUP"
+        cp -a "$PANEL" "$BACKUP/original"
+        printf 'branch=%s\ncommit=%s\ndate=%s\n' "$(git_panel rev-parse --abbrev-ref HEAD)" "$(git_panel rev-parse HEAD)" \
+            "$(date -Is)" > "$BACKUP/original.info"
+    else
+        say "Keeping the first backup ($BACKUP/original): revert will still bring back the official panel"
+    fi
 }
 
 restore_panel() {  # the panel exactly as in the backup (code, git state, swizzin.cfg, custom tiles)
@@ -102,20 +136,12 @@ install_edition() {
     # Files of the panel changed locally would be lost: only the custom tiles may be, as they are the same in both versions.
     changed=$(git_panel status --porcelain --untracked-files=no | awk '{print $NF}' | grep -vx 'core/custom/profiles.py' || true)
     [[ -z $changed ]] || die "these panel files were changed locally, keep a copy and undo the changes first: $(echo $changed)"
-    if [[ ! -d $BACKUP/original ]]; then
-        say "Backing up $PANEL to $BACKUP/original"
-        install -d -m 700 "$BACKUP"
-        cp -a "$PANEL" "$BACKUP/original"
-        printf 'branch=%s\ncommit=%s\ndate=%s\n' "$(git_panel rev-parse --abbrev-ref HEAD)" "$(git_panel rev-parse HEAD)" \
-            "$(date -Is)" > "$BACKUP/original.info"
-    else
-        say "Keeping the first backup ($BACKUP/original): revert will still bring back the official panel"
-    fi
+    backup_panel
     say "Fetching '$ref' from $REPO"
     git_panel fetch --quiet "$REPO" "$ref" || die "could not fetch '$ref' (nothing was changed)"
     git_panel checkout --quiet -B heliedan FETCH_HEAD || die "git could not switch the panel's files (see above): nothing was changed"
     if ! sudo -u "$PANEL_USER" bash -c "cd $PANEL && $PYTHON -c 'import core.util, core.custom.live_stats, core.custom.store'" >/dev/null 2>&1; then
-        remove_helper  # an update: the service of the previous version would be left without its panel
+        drop_helper  # an update: the service of the previous version would be left without its panel
         restore_panel
         die "the new code does not load with this server's Python: the panel was put back as it was"
     fi
@@ -127,7 +153,7 @@ install_edition() {
     chmod -R go-w "$tmp"
     if ! bash "$tmp/install.sh"; then
         rm -rf "$tmp"
-        remove_helper
+        drop_helper
         restore_panel
         die "the App Store service could not be installed: the panel was put back as it was"
     fi
@@ -136,7 +162,7 @@ install_edition() {
     systemctl restart panel
     sleep 5
     if ! systemctl is-active --quiet panel; then
-        remove_helper
+        drop_helper
         restore_panel
         die "the panel did not start with the new code: it was put back as it was (journalctl -u panel says why)"
     fi
@@ -188,7 +214,7 @@ remove_store() {
 }
 
 show_status() {
-    local branch commit state
+    local branch commit state job why
     need_root status
     if [[ -f $PANEL_LOCK && -d $PANEL/.git ]]; then
         branch=$(git_panel rev-parse --abbrev-ref HEAD)
@@ -208,10 +234,22 @@ show_status() {
         say "App Store service: not installed"
     elif edition_panel; then
         say "App Store service: $state"
-    else
+    elif ! grep -qs '^ConditionFileNotEmpty=' "$STORE_UNIT"; then  # installed before it knew its panel
         say "App Store service: LEFT BEHIND ($state). The panel it belongs to is gone or is no longer Heliedan's" \
-            "edition: it stops by itself (never during an installation) and does not start again." \
-            "Remove it: sudo bash $0 remove-store"
+            "edition, and this older version keeps running and starts at boot. Remove it now: sudo bash $0 remove-store"
+    else
+        why="The panel it belongs to is gone or is no longer Heliedan's edition"
+        job=none
+        [[ $state != active ]] || job=$(store_job)
+        case $job in
+            none) say "App Store service: LEFT BEHIND ($state). $why: it stops by itself and does not start again." \
+                      "Remove it: sudo bash $0 remove-store" ;;
+            "") say "App Store service: LEFT BEHIND ($state, does not answer). $why. If you are sure that no job" \
+                    "runs: systemctl stop swizzin-store, then sudo bash $0 remove-store" ;;
+            *) say "App Store service: LEFT BEHIND ($state, running: $job). $why: it stops by itself once that job" \
+                   "ends. A question of the installer cannot be answered without the panel: systemctl stop" \
+                   "swizzin-store ends it. Then remove it: sudo bash $0 remove-store" ;;
+        esac
     fi
     if [[ -f $BACKUP/original.info ]]; then
         say "Backup of the panel from before the switch: $BACKUP/original ($(paste -sd' ' "$BACKUP/original.info"))"

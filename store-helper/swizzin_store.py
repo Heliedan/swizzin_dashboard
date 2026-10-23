@@ -142,8 +142,11 @@ def panel_present(path):
     user can write there, so it is never opened or read, and nothing of it but its presence is used."""
     try:
         st = os.lstat(path)
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         return False
+    except OSError as e:  # a disk or network error proves nothing: the panel may still be there
+        log.warning("cannot look at %s: %s", path, e)
+        return True
     return stat.S_ISREG(st.st_mode) and st.st_size > 0
 
 
@@ -937,7 +940,9 @@ class Helper:
 def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     opts = options(argv)
-    if not panel_present(opts.panel_marker):  # before anything is created: no socket, no log, no recovery
+    # Before anything is created: no socket, no log. The recovery of a removal cut off by a crash (_recover) waits
+    # too, until the service starts again with the panel.
+    if not panel_present(opts.panel_marker):
         log.warning("not started: %s is missing, so the panel was removed or is no longer Heliedan's edition"
                     " (heliedan.sh status says more, heliedan.sh remove-store removes this service).", opts.panel_marker)
         return

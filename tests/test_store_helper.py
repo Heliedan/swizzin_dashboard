@@ -223,6 +223,18 @@ class PanelMarker(unittest.TestCase):
         self.assertIn("stopping: %s is gone" % self.helper.marker, err)
         self.assertFalse(os.path.exists(self.helper.path))
 
+    def test_only_a_missing_file_is_a_missing_panel(self):
+        """A disk or network error proves nothing: the helper keeps serving rather than stop on it."""
+        sys.path.insert(0, os.path.dirname(HELPER))
+        import swizzin_store
+        loop = os.path.join(self.base, "loop")
+        os.symlink(loop, loop)  # looking through it fails with ELOOP, as a dead network folder fails with EIO
+        self.assertTrue(swizzin_store.panel_present(os.path.join(loop, "swizzin_store.py")))
+        afile = os.path.join(self.base, "afile")
+        open(afile, "w").close()
+        self.assertFalse(swizzin_store.panel_present(os.path.join(afile, "swizzin_store.py")))  # ENOTDIR: not there
+        self.assertFalse(swizzin_store.panel_present(os.path.join(self.base, "nothing.py")))  # ENOENT
+
     def test_a_single_miss_is_not_enough(self):
         """git replaces the file when the panel is updated: the panel is gone only at two looks in a row."""
         sys.path.insert(0, os.path.dirname(HELPER))

@@ -7,6 +7,7 @@ those tests are skipped without it, except with REQUIRE_SWIZZIN_SRC=1 (the autom
 
 Run from the repository root: python tests/test_heliedan.py (nothing on the machine is touched, as root or not).
 """
+import hashlib
 import os
 import pwd
 import re
@@ -27,6 +28,12 @@ HELIEDAN = os.path.join(ROOT, "heliedan.sh")
 SRC = os.environ.get("SWIZZIN_SRC") or "/etc/swizzin"
 HAVE_SRC = os.access(os.path.join(SRC, "scripts", "remove", "panel.sh"), os.R_OK)
 SRC_REQUIRED = os.environ.get("REQUIRE_SWIZZIN_SRC") == "1"  # the automatic tests: never skipped in silence
+# Swizzin's scripts that are replayed, as they are at the commit AUDITED of store-helper/removable.py. Another version
+# is not run: the marker must be checked again against it first (does it still delete store-helper/?).
+SWIZZIN_PANEL_SCRIPTS = {
+    "remove/panel.sh": "17ae7855b3379f0aa307019cc835aca07fe0d551118ab3e00812f3f26dd38049",
+    "upgrade/panel.sh": "fd25e01407a0c3426a22f3664c804e0c0d47750337cfd80d2ffe93156aa06586",
+}
 
 # Fake systemctl. Units are files under $FAKE_ROOT/etc/systemd/system; a unit runs while $FAKE_STATE/run/<unit>.active
 # exists, and a stop does not stop it while <unit>.stuck exists too. Every call is noted in $FAKE_STATE/calls.log.
@@ -55,8 +62,11 @@ case ${args[0]:-} in
 esac
 """
 
-# heliedan.sh sourced (functions only), every path of it moved under the fake root, then run like `heliedan.sh "$@"`.
+# heliedan.sh sourced (functions only), every path of it moved under the fake root, then run like `heliedan.sh "$@"`
+# (or one of its functions, TEST_CALL). Nothing of the test's arguments reaches the script while it is sourced.
 PRELUDE = r"""
+args=("$@")
+set --
 source "$HELIEDAN"
 R=$FAKE_ROOT
 PANEL=$R/opt/swizzin
@@ -72,7 +82,7 @@ PANEL_USER=$TEST_USER
 need_root() { :; }                     # run as root or not: the paths are the tests' own
 git_panel() { git -C "$PANEL" "$@"; }  # no swizzin user here
 sleep() { :; }
-main "$@"
+"${TEST_CALL:-main}" "${args[@]}"
 """
 
 # What Swizzin's scripts need around them (functions of its globals, sudo, packages), for a replay.
@@ -139,6 +149,8 @@ class Server:
         git(self.panel, "add", "-A")
         git(self.panel, "commit", "-q", "-m", "edition")
         write(self.path("/install/.panel.lock"))
+        hour_ago = os.stat(self.path("/var/backups/heliedan/original.info")).st_mtime - 3600
+        os.utime(self.path("/install/.panel.lock"), (hour_ago, hour_ago))  # the panel was there before the backup
         write(self.path("/opt/.venv/swizzin/bin/python"), "#!/bin/sh\nexit 0\n")  # its requirements are fine
         os.chmod(self.path("/opt/.venv/swizzin/bin/python"), 0o755)
         write(self.path("/etc/systemd/system/panel.service"), "[Service]\n")
@@ -179,10 +191,10 @@ class Server:
                 "FAKE_STATE": self.base, "HELIEDAN": HELIEDAN, "TEST_PYTHON": sys.executable, "TEST_SOCKET": self.socket,
                 "TEST_USER": pwd.getpwuid(os.getuid()).pw_name}
 
-    def heliedan(self, *args):
-        """heliedan.sh "$@" on this server: (exit code, what it printed)."""
-        r = subprocess.run(["bash", "-c", PRELUDE, "heliedan.sh", *args], env=self.env(), capture_output=True,
-                           text=True, timeout=120)
+    def heliedan(self, *args, call="main"):
+        """heliedan.sh "$@" on this server (or one of its functions): (exit code, what it printed)."""
+        r = subprocess.run(["bash", "-c", PRELUDE, "heliedan.sh", *args], env=dict(self.env(), TEST_CALL=call),
+                           capture_output=True, text=True, timeout=120)
         return r.returncode, r.stdout + r.stderr
 
     def calls(self):
@@ -197,8 +209,11 @@ class Server:
 
     def swizzin(self, script):
         """Swizzin's own script (scripts/remove/panel.sh or scripts/upgrade/panel.sh), run on this server."""
-        with open(os.path.join(SRC, "scripts", script)) as f:
-            text = f.read()
+        with open(os.path.join(SRC, "scripts", script), "rb") as f:
+            raw = f.read()
+        assert hashlib.sha256(raw).hexdigest() == SWIZZIN_PANEL_SCRIPTS[script], \
+            "%s is not the audited one: check the marker against it, then update SWIZZIN_PANEL_SCRIPTS" % script
+        text = raw.decode()
         text = re.sub(r"(?<![\w.$/-])/(opt|srv|etc|install|home)(?=/)", self.root + r"/\1", text)
         outside = set(re.findall(r"(?<![\w.$/-])/[\w./*-]+", text.replace(self.root, "ROOT")))
         assert outside <= {"/dev/null", "/bin/bash"}, "a path of %s is not moved: %s" % (script, outside)
@@ -295,6 +310,43 @@ class Status(HeliedanTest):
         code, out = self.server.heliedan("status")
         self.assertEqual(code, 0, out)
         self.assertIn("Panel: the official code", out)
+        self.assertIn("App Store service: LEFT BEHIND", out)
+
+
+    @unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
+    def test_an_older_service_left_behind_says_it_keeps_running(self):
+        """A service installed before it knew its panel (no Condition in its unit) does not stop by itself."""
+        self.require_src()
+        unit = self.server.path("/etc/systemd/system/swizzin-store.service")
+        with open(unit) as f:
+            text = f.read()
+        write(unit, re.sub(r"^Condition.*\n", "", text, flags=re.M))
+        self.server.swizzin("remove/panel.sh")
+        self.server.set_running("swizzin-store")
+        code, out = self.server.heliedan("status")
+        self.assertEqual(code, 0, out)
+        self.assertIn("LEFT BEHIND (active)", out)
+        self.assertIn("this older version keeps running and starts at boot. Remove it now", out)
+
+    @unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
+    def test_left_behind_while_a_job_runs(self):
+        self.require_src()
+        self.helper(busy=True)
+        self.server.swizzin("remove/panel.sh")
+        code, out = self.server.heliedan("status")
+        self.assertEqual(code, 0, out)
+        self.assertIn("LEFT BEHIND (active, running: install jackett)", out)
+        self.assertIn("systemctl stop swizzin-store ends it", out)
+        self.server.socket = os.path.join(self.base, "nothing.sock")  # running, but it does not answer
+        code, out = self.server.heliedan("status")
+        self.assertIn("LEFT BEHIND (active, does not answer)", out)
+
+    def test_a_folder_is_not_the_marker(self):
+        """The marker is a file, as for the service: a folder of that name (made by the panel user) is not."""
+        marker = os.path.join(self.server.panel, "store-helper", "swizzin_store.py")
+        os.unlink(marker)
+        write(os.path.join(marker, "x"), "x\n")
+        code, out = self.server.heliedan("status")
         self.assertIn("App Store service: LEFT BEHIND", out)
 
 
@@ -415,6 +467,47 @@ class Revert(HeliedanTest):
         self.assertEqual(len(self.server.store_left()), len(STORE_PIECES))  # revert changes nothing there
 
 
+class Install(HeliedanTest):
+    """Pieces of heliedan.sh install that run without a network or a real panel."""
+
+    def test_a_failure_never_cuts_off_an_installation_started_meanwhile(self):
+        self.helper(busy=True)
+        code, out = self.server.heliedan(call="drop_helper")  # install failed after its first look (git fetch...)
+        self.assertEqual(code, 0, out)
+        self.assertIn("running a job (or does not answer), so it was left in place", out)
+        self.assertEqual(len(self.server.store_left()), len(STORE_PIECES))
+        self.assertFalse([c for c in self.server.calls() if c.split()[1] in ("disable", "stop")])
+
+    def test_a_failure_removes_an_idle_service(self):
+        self.helper()
+        code, out = self.server.heliedan(call="drop_helper")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.server.store_left(), [], out)
+
+    def test_the_first_backup_is_kept(self):
+        info = self.server.path("/var/backups/heliedan/original.info")
+        with open(info) as f:
+            before = f.read()
+        code, out = self.server.heliedan(call="backup_panel")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Keeping the first backup", out)
+        with open(info) as f:
+            self.assertEqual(f.read(), before)
+
+    def test_a_panel_installed_again_gets_a_new_backup(self):
+        """box remove panel, box install panel, then install: the old backup is not the panel to put back."""
+        lock = self.server.path("/install/.panel.lock")
+        later = os.stat(self.server.path("/var/backups/heliedan/original.info")).st_mtime + 60
+        os.utime(lock, (later, later))  # box install panel touches the lock at its end
+        code, out = self.server.heliedan(call="backup_panel")
+        self.assertEqual(code, 0, out)
+        self.assertIn("that backup is set aside", out)
+        backups = os.listdir(self.server.path("/var/backups/heliedan"))
+        self.assertEqual(sorted(b.split("-")[0] for b in backups), ["original", "original.info", "replaced", "replaced"])
+        with open(self.server.path("/var/backups/heliedan/original.info")) as f:
+            self.assertIn("branch=heliedan", f.read())  # this panel, as it is now
+
+
 class Marker(unittest.TestCase):
     """The helper, its unit, install.sh and heliedan.sh agree on the file that says the panel is this edition."""
 
@@ -439,6 +532,14 @@ class Marker(unittest.TestCase):
         for tie in ("BindsTo=", "PartOf=", "Requires=", "Requisite="):  # a restart of the panel must not reach it
             self.assertNotRegex(unit, re.compile("^" + tie, re.M))
         self.assertRegex(unit, re.compile(r"^Restart=on-failure$", re.M))  # its exit 0 when the panel is gone: final
+
+    @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze is not installed")
+    def test_systemd_reads_every_line_of_the_unit(self):
+        """A misspelt Condition would be ignored with a mere warning, and the service would start anyway."""
+        unit = os.path.join(ROOT, "store-helper", "swizzin-store.service")
+        r = subprocess.run(["systemd-analyze", "verify", unit], capture_output=True, text=True, timeout=60)
+        about_it = [line for line in (r.stdout + r.stderr).splitlines() if "swizzin-store.service" in line]
+        self.assertEqual((r.returncode, about_it), (0, []))
 
     def test_usage_lists_remove_store_and_sourcing_runs_nothing(self):
         r = subprocess.run(["bash", HELIEDAN], capture_output=True, text=True)

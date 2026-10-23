@@ -67,7 +67,7 @@ id swizzin >/dev/null 2>&1 || { echo "No 'swizzin' user: is the Swizzin panel in
 [[ -x /usr/local/bin/swizzin/box ]] || { echo "Swizzin's box command is missing (/usr/local/bin/swizzin/box)." >&2; exit 1; }
 # The service runs only with Heliedan's edition of the panel (see swizzin-store.service): it would not start.
 MARKER=/opt/swizzin/store-helper/swizzin_store.py
-if [[ -L $MARKER || ! -s $MARKER ]]; then
+if [[ -L $MARKER || ! -f $MARKER || ! -s $MARKER ]]; then
     echo "The panel in /opt/swizzin is not Heliedan's edition ($MARKER is missing): the App Store helper" \
          "would not start. Switch the panel first: heliedan.sh install (see the README)." >&2
     exit 1
