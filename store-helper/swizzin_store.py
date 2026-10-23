@@ -29,6 +29,8 @@ Swizzin files are the audited ones; it saves the app's settings first and never 
 
 Installed by store-helper/install.sh into /usr/local/lib/swizzin-store/ (root-owned),
 never run from /opt/swizzin, which the panel user can write. Standard library only.
+It serves Heliedan's edition of the panel and nothing else: it does not start without that panel, and stops (once
+no installation or uninstallation runs) when the panel is removed or replaced by the official one (PANEL_MARKER).
 """
 import argparse
 import codecs
@@ -45,6 +47,7 @@ import secrets
 import selectors
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -77,6 +80,11 @@ FEATURES = ["install", "remove"]  # tells the panel which operations this versio
 TICKET_TTL = 300  # seconds a confirmation window may stay open before uninstalling
 REMOVE_STOP_WAIT = 540  # seconds this service waits for a removal when told to stop (its TimeoutStopSec is 600)
 REMOVE_PHASES = ("check", "stop", "copy", "remove", "fix", "verify")
+# Heliedan's edition of the panel carries this service's source: while it is there, the panel is that edition.
+# box remove panel deletes /opt/swizzin, box upgrade panel puts the official code back (git reset --hard), and
+# heliedan.sh revert puts the backup back: each one takes it away, and this service then has nothing to serve.
+PANEL_MARKER = "/opt/swizzin/store-helper/swizzin_store.py"
+MARKER_EVERY = 15  # seconds between two looks at it; missing at two looks in a row, the panel is gone
 # The installers' whole environment: nothing comes from the client or from this service's own
 # environment (scripts read common names such as user, pass or log). PATH ends like root's over SSH
 # (Swizzin adds /usr/local/bin/swizzin in .bashrc). TERM is required: without
@@ -122,7 +130,21 @@ def options(argv=None):
     p.add_argument("--test-path", help="tests: folder put first in the uninstaller's PATH (fake system tools)")
     p.add_argument("--test-env", action="append", default=[], help="tests: NAME=VALUE for the uninstaller")
     p.add_argument("--runner-option", action="append", default=[], help="tests: an option for remove_runner.py")
+    p.add_argument("--panel-marker", default=PANEL_MARKER,
+                   help="the file of Heliedan's edition of the panel without which this service does not run")
+    p.add_argument("--marker-every", type=float, default=MARKER_EVERY, help="tests: seconds between two looks at it")
     return p.parse_args(argv)
+
+
+def panel_present(path):
+    """Whether the panel is still Heliedan's edition (PANEL_MARKER), checked like the conditions of
+    swizzin-store.service: a file that is not empty. It is only looked at, never opened: the panel user can write
+    there. A symbolic link does not count, so that it cannot make root look at another file."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_size > 0
 
 
 def descriptions(path):
@@ -275,6 +297,7 @@ class Helper:
         self.job = None  # the running installation, or the last one of this run
         self.last = None  # summary of the last finished installation
         self.tickets = {}  # ticket -> (app, expiry): the confirmation window shown for an uninstallation
+        self.marker_misses = 0  # looks in a row that did not find PANEL_MARKER
         if opts.allow_uid is not None:
             self.allowed, self.group = {0, opts.allow_uid}, None
         else:
@@ -309,9 +332,12 @@ class Helper:
         return s
 
     def run(self):
+        """Serves until the panel is gone (PANEL_MARKER), and never stops in the middle of a job for that."""
+        next_look = time.monotonic() + self.opts.marker_every
         while True:
             running = self.job is not None and self.job.phase != "done"
-            for key, events in self.sel.select(0.5 if running else None):
+            wait = max(next_look - time.monotonic(), 0)
+            for key, events in self.sel.select(min(wait, 0.5) if running else wait):
                 if key.data is None:
                     self._accept()
                 elif isinstance(key.data, Job):
@@ -323,6 +349,19 @@ class Helper:
                     if events & selectors.EVENT_WRITE and not c.closed:
                         self._write(c)
             self._poll_job()
+            if time.monotonic() >= next_look:
+                next_look = time.monotonic() + self.opts.marker_every
+                if self._panel_gone() and (self.job is None or self.job.phase == "done"):
+                    log.warning("stopping: %s is gone, so the panel was removed or is no longer Heliedan's edition."
+                                " This service will not start again (heliedan.sh remove-store removes it).",
+                                self.opts.panel_marker)
+                    return
+
+    def _panel_gone(self):
+        """One look at the panel: True once PANEL_MARKER was missing at two looks in a row (updating the panel with
+        git replaces the file, so a single miss is not enough)."""
+        self.marker_misses = 0 if panel_present(self.opts.panel_marker) else self.marker_misses + 1
+        return self.marker_misses >= 2
 
     def _accept(self):
         try:
@@ -898,6 +937,10 @@ class Helper:
 def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     opts = options(argv)
+    if not panel_present(opts.panel_marker):  # before anything is created: no socket, no log, no recovery
+        log.warning("not started: %s is missing, so the panel was removed or is no longer Heliedan's edition"
+                    " (heliedan.sh status says more, heliedan.sh remove-store removes this service).", opts.panel_marker)
+        return
     helper = Helper(opts)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     log.info("listening on %s", opts.socket)

@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -237,6 +238,21 @@ class Remove(unittest.TestCase):
         self.assertEqual(summary["result"], "removed")
         self.assertFalse(os.path.exists(self.w.path("/install/.demo.lock")))
         self.start()
+
+    def test_the_panel_going_away_never_cuts_off_a_removal(self):
+        self.helper.stop()
+        self.start("--marker-every", "0.2")
+        self.w.app("demo", RUNNING + "sleep 3\n" + DEMO, **self.w.apps["demo"])
+        c, started = self.remove()
+        c.wait_output("demo script running", timeout=30)
+        os.unlink(self.helper.marker)  # box remove panel over SSH, while the App Store uninstalls an app
+        time.sleep(1)  # several looks without the panel: still serving, the removal still running
+        self.assertEqual(self.catalogue()["job"]["app"], "demo")
+        seen, done = self.phases(c)
+        self.assertEqual(done["result"], "removed", c.output)  # to its end, checks included
+        self.assertEqual(self.helper.proc.wait(timeout=5), 0)  # then the helper stops by itself
+        self.assertFalse(os.path.exists(self.w.path("/install/.demo.lock")))
+        self.start()  # for tearDown
 
     def test_a_crash_before_the_script_is_put_back_at_the_next_start(self):
         self.helper.stop()

@@ -1,6 +1,12 @@
 [Unit]
 Description=Swizzin App Store helper (installs and uninstalls Swizzin apps for the panel)
 After=local-fs.target
+# Only with Heliedan's edition of the panel, whose code carries this service's source: box remove panel and box
+# upgrade panel take it away. The service checks it again when it starts, and stops by itself once it is gone
+# (PANEL_MARKER in swizzin_store.py). Not BindsTo= or PartOf=panel.service: installers restart the panel, and
+# that must not cut off an installation.
+ConditionPathIsSymbolicLink=!/opt/swizzin/store-helper/swizzin_store.py
+ConditionFileNotEmpty=/opt/swizzin/store-helper/swizzin_store.py
 
 [Service]
 # Runs as root on purpose: it reads /etc/swizzin, which only root can read. No Group=,
@@ -12,6 +18,7 @@ LogsDirectory=swizzin-store
 LogsDirectoryMode=0700
 WorkingDirectory=/root
 UMask=0022
+# Not when it stopped because the panel is gone: it then exits with 0.
 Restart=on-failure
 # Stopping it during an uninstallation: only this service gets SIGTERM; it waits for Swizzin's remove script to
 # end (it must not be cut off halfway), then everything left is killed. Installations stop at once, as before.
