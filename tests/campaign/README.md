@@ -38,8 +38,9 @@ docker exec swz-base bash -c 'curl -fsSL https://s5n.sh -o /root/setup.sh &&
 
 # this repository's panel and App Store (run from the repository root). git archive writes its files
 # writable by the group (664), and store-helper/install.sh refuses files that another user could change.
+# The panel needs its copy of store-helper/: without it, the App Store helper does not run (PANEL_MARKER).
 git archive HEAD | docker exec -i swz-base bash -c 'mkdir -p /root/fork && tar -x -C /root/fork && chmod -R go-w /root/fork'
-docker exec swz-base bash -c 'cd /root/fork && cp -a swizzin.py /opt/swizzin/ && cp -a core static templates /opt/swizzin/ &&
+docker exec swz-base bash -c 'cd /root/fork && cp -a swizzin.py /opt/swizzin/ && cp -a core static templates store-helper /opt/swizzin/ &&
   chown -R swizzin:swizzin /opt/swizzin && bash store-helper/install.sh && systemctl restart panel'
 
 docker stop swz-base && docker commit swz-base swz-camp:base && docker rm swz-base
