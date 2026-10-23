@@ -138,8 +138,8 @@ def options(argv=None):
 
 def panel_present(path):
     """Whether the panel is still Heliedan's edition (PANEL_MARKER), checked like the conditions of
-    swizzin-store.service: a file that is not empty. It is only looked at, never opened: the panel user can write
-    there. A symbolic link does not count, so that it cannot make root look at another file."""
+    swizzin-store.service: a file that is not empty, and not a symbolic link. Its metadata only (lstat): the panel
+    user can write there, so it is never opened or read, and nothing of it but its presence is used."""
     try:
         st = os.lstat(path)
     except OSError:
