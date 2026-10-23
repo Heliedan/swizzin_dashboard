@@ -196,7 +196,7 @@ show_status() {
         if git_panel cat-file -e HEAD:core/custom/store/__init__.py 2>/dev/null; then  # only this edition has the App Store
             say "Panel: Heliedan's edition (commit $commit)"
         elif [[ $branch == heliedan ]]; then
-            say "Panel: the official code (commit $commit), brought back by box upgrade panel; revert cleans up the rest"
+            say "Panel: the official code (commit $commit), brought back by box upgrade panel or box update; revert cleans up the rest"
         else
             say "Panel: branch $branch (commit $commit)"
         fi
