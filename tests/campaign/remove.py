@@ -213,7 +213,7 @@ class Campaign:
                  "/usr/local/lib/swizzin-store/swizzin_store.py %s\n" % args)
         self.sh(name, "mkdir -p /etc/systemd/system/swizzin-store.service.d && cp /root/campaign/dropin.conf"
                 " /etc/systemd/system/swizzin-store.service.d/campagne.conf && cd /root/fork &&"
-                " cp -a swizzin.py /opt/swizzin/ && cp -a core static templates /opt/swizzin/ &&"
+                " cp -a swizzin.py /opt/swizzin/ && cp -a core static templates store-helper /opt/swizzin/ &&"
                 " chown -R swizzin:swizzin /opt/swizzin && bash store-helper/install.sh && systemctl restart panel",
                 timeout=300, check=True)
         self.wait_helper(name)

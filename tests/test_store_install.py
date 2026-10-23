@@ -454,6 +454,19 @@ class Install(unittest.TestCase):
         self.assertEqual(subprocess.run(["pgrep", "-f", "box install jackett"], capture_output=True).stdout, b"")
         self.helper = Helper(self.base, extra=self.extra)
 
+    def test_the_panel_going_away_never_cuts_off_an_installation(self):
+        self.helper.stop()
+        self.helper = Helper(self.base, extra=self.extra + ("--marker-every", "0.2"))
+        c, _ = self.install("sonarr")
+        c.wait_output("Continue? (y/n)")
+        os.unlink(self.helper.marker)  # box remove panel over SSH, while the App Store installs an app
+        time.sleep(1.5)  # several looks without the panel
+        self.assertIsNone(self.helper.proc.poll())
+        c.send(op="input", data="y\r")
+        self.assertEqual(self.done(c)["result"], "installed")  # to its end, checks included
+        self.assertEqual(self.helper.proc.wait(timeout=5), 0)  # then the helper stops by itself
+        self.helper = Helper(self.base, extra=self.extra)  # for tearDown
+
     def test_a_crash_is_marked_interrupted_at_the_next_start(self):
         self.helper.stop()
         os.makedirs(self.logs, exist_ok=True)
