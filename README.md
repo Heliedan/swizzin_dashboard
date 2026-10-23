@@ -138,7 +138,21 @@ sudo bash heliedan.sh status
 sudo bash heliedan.sh revert      # put the official panel back exactly as it was
 ```
 
-It changes nothing else (no nginx, sudo or Swizzin setting). Your custom tiles (`core/custom/profiles.py`) and `swizzin.cfg` are kept, and if a step fails, the panel is put back as it was. Run `install` again to update. `box upgrade panel` also brings the official code back, but leaves the App Store service and a few unused files: `heliedan.sh revert` removes them.
+It changes nothing else (no nginx, sudo or Swizzin setting). Your custom tiles (`core/custom/profiles.py`) and `swizzin.cfg` are kept, and if a step fails, the panel is put back as it was. Run `install` again to update. `box upgrade panel` also brings the official code back: see [Removing](#removing).
+
+### Removing
+
+The App Store's root service (`swizzin-store`) belongs to this edition's panel, and Swizzin's own `box remove panel` and `box upgrade panel` do not know it. Remove it first:
+
+```bash
+sudo bash heliedan.sh revert          # the official panel back, the App Store service removed
+sudo box remove panel                 # then, only if you want no panel at all
+# or, to remove this edition's panel without going back to the official one first:
+sudo bash heliedan.sh remove-store    # the App Store service only: its unit and its files
+sudo box remove panel
+```
+
+If `box remove panel` or `box upgrade panel` was used anyway, the service stops by itself within 30 seconds, once no installation or uninstallation from the App Store is running (it never cuts one off), and it does not start again, even after a reboot: it runs only while the panel is this edition (the panel's copy of `store-helper/swizzin_store.py` is its marker). Its files stay: `sudo bash heliedan.sh status` says "LEFT BEHIND", and `sudo bash heliedan.sh remove-store` removes them (after `box upgrade panel`, `revert` does too, and puts the backup back). Every removal keeps the service's logs (`/var/log/swizzin-store`), the copies of the settings of the apps it uninstalled (`/var/backups/swizzin-store`) and the backup of the official panel (`/var/backups/heliedan`): delete them by hand if you do not need them.
 
 ### Transparency
 
