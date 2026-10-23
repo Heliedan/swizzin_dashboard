@@ -222,6 +222,7 @@ class HeliedanTest(unittest.TestCase):
 
     def setUp(self):
         self.base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)  # even when Server() fails halfway
         self.server = Server(self.base)
         self.helpers = []
 
@@ -234,7 +235,6 @@ class HeliedanTest(unittest.TestCase):
         for helper in self.helpers:
             helper.stop()
         subprocess.run(["pkill", "-f", self.base], stderr=subprocess.DEVNULL)
-        shutil.rmtree(self.base, ignore_errors=True)
 
     def helper(self, busy=False):
         """A real App Store helper on its own socket, running for the service: idle, or busy with an installation."""
