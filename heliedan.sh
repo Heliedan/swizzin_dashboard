@@ -14,6 +14,9 @@ set -euo pipefail
 REPO=https://github.com/Heliedan/swizzin_dashboard
 PANEL=/opt/swizzin
 PANEL_LOCK=/install/.panel.lock
+# Swizzin's lock when the edition was installed with box install altdash: box then manages the panel and the App
+# Store service, and this script leaves them alone.
+ALTDASH_LOCK=/install/.altdash.lock
 PANEL_USER=swizzin
 BACKUP=/var/backups/heliedan
 PYTHON=/opt/.venv/swizzin/bin/python
@@ -31,9 +34,14 @@ say() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 git_panel() { sudo -H -u "$PANEL_USER" git -C "$PANEL" "$@"; }  # the panel's files belong to the swizzin user
 need_root() { [[ $EUID -eq 0 ]] || die "run it as root: sudo bash $0 ${1:-}"; }
+not_box() {
+    [[ ! -f $ALTDASH_LOCK ]] || die "the edition was installed with box install altdash: Swizzin manages it." \
+        "Use box upgrade altdash to update it, box remove altdash then box install panel for the official panel"
+}
 
 checks() {
     need_root "${1:-}"
+    not_box
     if [[ ! -f $PANEL_LOCK || ! -d $PANEL/.git ]]; then
         store_installed && die "no Swizzin panel in $PANEL. If box remove panel removed it, remove the App Store" \
             "service it left behind: sudo bash $0 remove-store"
@@ -194,6 +202,7 @@ revert_edition() {
 remove_store() {
     local left
     need_root remove-store
+    not_box
     if ! store_installed; then
         say "The App Store service is not installed: nothing to remove"
         return 0
@@ -216,6 +225,11 @@ remove_store() {
 show_status() {
     local branch commit state job why
     need_root status
+    if [[ -f $ALTDASH_LOCK ]]; then
+        say "Installed with box install altdash: Swizzin manages the panel and the App Store service." \
+            "box upgrade altdash updates them, box remove altdash removes them"
+        return 0
+    fi
     if [[ -f $PANEL_LOCK && -d $PANEL/.git ]]; then
         branch=$(git_panel rev-parse --abbrev-ref HEAD)
         commit=$(git_panel rev-parse --short HEAD)

@@ -24,7 +24,7 @@ def fake_swizzin(base):
     """Install scripts, descriptions and locks laid out like on a Swizzin server."""
     os.makedirs(os.path.join(base, "scripts"))
     os.makedirs(os.path.join(base, "locks"))
-    for name in ("jellyfin", "sonarr", "nginx", "letsencrypt", "Bad Name", "UPPER", "a" * 33):
+    for name in ("jellyfin", "sonarr", "nginx", "letsencrypt", "panel", "altdash", "Bad Name", "UPPER", "a" * 33):
         open(os.path.join(base, "scripts", name + ".sh"), "w").close()
     open(os.path.join(base, "scripts", "notes.txt"), "w").close()
     for name in ("nginx", "jellyfin", "mysite"):
@@ -110,12 +110,13 @@ class StoreHelper(unittest.TestCase):
         self.assertIsNone(reply["job"])
         apps = {a["name"]: a for a in reply["apps"]}
         # odd file names are left out; locks of non-Swizzin apps (mysite) do not add entries
-        self.assertEqual(sorted(apps), ["jellyfin", "letsencrypt", "nginx", "sonarr"])
+        self.assertEqual(sorted(apps), ["altdash", "jellyfin", "letsencrypt", "nginx", "panel", "sonarr"])
         self.assertEqual(apps["jellyfin"]["description"], "A TV, Film and Music player.")
         self.assertEqual(apps["sonarr"]["description"], "Watches series and it's great")
         self.assertEqual(apps["letsencrypt"]["description"], "")  # an exact key, not a prefix
         self.assertEqual({n for n, a in apps.items() if a["installed"]}, {"jellyfin", "nginx"})
-        self.assertEqual({n for n, a in apps.items() if a["blocked"]}, {"letsencrypt", "nginx"})
+        # the panel itself, in either edition, is never installed over itself from its own page
+        self.assertEqual({n for n, a in apps.items() if a["blocked"]}, {"altdash", "letsencrypt", "nginx", "panel"})
         self.assertIn("install", reply["features"])  # the panel shows only what this version can do
 
     def test_list_is_read_again_at_each_request(self):

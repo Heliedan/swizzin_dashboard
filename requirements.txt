@@ -6,3 +6,4 @@ flask-limiter>=3.0.0
 eventlet
 requests
 dnspython<2.3
+packaging
