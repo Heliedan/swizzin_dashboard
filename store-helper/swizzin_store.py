@@ -64,10 +64,10 @@ NAME = re.compile(r"[a-z0-9]{1,32}")
 UNIT = re.compile(r"[A-Za-z0-9@._-]+\.service")
 RUNNER = os.path.join(HERE, "remove_runner.py")
 APP_CHECK = os.path.join(HERE, "check_app.py")
-# Not offered by the App Store, refused here: system components and tools that are set up on the
-# machine itself (over SSH), some of which change how the server is reached or secured, and xmrig,
-# a cryptocurrency miner that mines for the Swizzin project when it is not given a wallet.
-BLOCKED = ("panel", "nginx", "letsencrypt", "quota", "wireguard", "x2go", "webmin", "shellinabox",
+# Not offered by the App Store, refused here: the panel itself (Swizzin's, or this edition installed with
+# box install altdash), system components and tools that are set up on the machine itself (over SSH),
+# some of which change how the server is reached or secured, and xmrig, a cryptocurrency miner.
+BLOCKED = ("panel", "altdash", "nginx", "letsencrypt", "quota", "wireguard", "x2go", "webmin", "shellinabox",
            "ffmpeg", "rclone", "vsftpd", "duckdns", "xmrig")
 MAX_CLIENTS = 8
 MAX_LINE = 64 * 1024

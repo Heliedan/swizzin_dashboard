@@ -71,6 +71,7 @@ source "$HELIEDAN"
 R=$FAKE_ROOT
 PANEL=$R/opt/swizzin
 PANEL_LOCK=$R/install/.panel.lock
+ALTDASH_LOCK=$R/install/.altdash.lock
 BACKUP=$R/var/backups/heliedan
 PYTHON=$TEST_PYTHON
 STORE_LIB=$R/usr/local/lib/swizzin-store
@@ -506,6 +507,43 @@ class Install(HeliedanTest):
         self.assertEqual(sorted(b.split("-")[0] for b in backups), ["original", "original.info", "replaced", "replaced"])
         with open(self.server.path("/var/backups/heliedan/original.info")) as f:
             self.assertIn("branch=heliedan", f.read())  # this panel, as it is now
+
+
+def tree(root):
+    """Every file and folder under root, with its content: to see that nothing changed."""
+    found = {}
+    for folder, dirs, files in os.walk(root):
+        for name in dirs + files:
+            path = os.path.join(folder, name)
+            if os.path.islink(path) or os.path.isdir(path):
+                found[path] = os.readlink(path) if os.path.islink(path) else "dir"
+            else:
+                with open(path, "rb") as f:
+                    found[path] = f.read()
+    return found
+
+
+class InstalledWithBox(HeliedanTest):
+    """Installed with box install altdash, the edition belongs to Swizzin's box: this script leaves it alone."""
+
+    def setUp(self):
+        super().setUp()
+        os.rename(self.server.path("/install/.panel.lock"), self.server.path("/install/.altdash.lock"))
+
+    def test_install_revert_and_remove_store_are_refused(self):
+        before = tree(self.server.root)
+        for command in ("install", "revert", "remove-store"):
+            code, out = self.server.heliedan(command)
+            self.assertEqual(code, 1, out)
+            self.assertIn("installed with box install altdash", out)
+            self.assertIn("box remove altdash", out)
+        self.assertEqual(tree(self.server.root), before)  # nothing touched
+
+    def test_status_points_to_box(self):
+        code, out = self.server.heliedan("status")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Installed with box install altdash", out)
+        self.assertIn("box upgrade altdash", out)
 
 
 class Marker(unittest.TestCase):

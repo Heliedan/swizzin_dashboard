@@ -29,6 +29,8 @@ import core.util as util  # module import only: core.util and swizzin.py import 
 from core.htpasswd import client_address
 
 SOCKET = "/run/swizzin-store/store.sock"
+# Swizzin's lock when this edition was installed with box install altdash: box then installs the service too.
+ALTDASH_LOCK = "/install/.altdash.lock"
 
 # Names for apps without a panel profile (the others use the profile's pretty_name).
 PRETTY = {"airsonic": "Airsonic", "calibre": "Calibre", "jfago": "jfa-go"}
@@ -341,7 +343,7 @@ def register(app, socketio, htpasswd):
         response = flask.make_response(flask.render_template(
             "store/store.html", title="App Store", user=user, pages=util.generate_page_list(user),
             vendor=vendor, apps=shown, error=error, job=reply.get("job"), last=reply.get("last"),
-            ask_password=ask_password()))
+            ask_password=ask_password(), box_install=os.path.isfile(ALTDASH_LOCK)))
         response.headers["Cache-Control"] = "no-store"
         # no other site may show this page in a frame and trick a click on Install or Uninstall
         response.headers["X-Frame-Options"] = "DENY"

@@ -170,7 +170,22 @@ class StorePage(unittest.TestCase):
             swizzin.app.config["STORE_SOCKET"] = self.helper.path
         self.assertEqual(r.status_code, 200)
         self.assertIn("The App Store helper is not running", html)
+        self.assertIn("store-helper/install.sh", html)
+        self.assertNotIn("box upgrade altdash", html)
         self.assertNotIn("store-item", html)
+
+    def test_installed_with_box_the_page_gives_the_box_command(self):
+        swizzin.app.config["STORE_SOCKET"] = os.path.join(self.base, "missing.sock")
+        lock = os.path.join(self.base, "altdash.lock")
+        open(lock, "w").close()
+        try:
+            with mock.patch.object(store, "ALTDASH_LOCK", lock):
+                r, html = self.page()
+        finally:
+            swizzin.app.config["STORE_SOCKET"] = self.helper.path
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("ALTDASH_STORE=yes box upgrade altdash", html)
+        self.assertNotIn("store-helper/install.sh", html)
 
     def test_sidebar_link_for_the_admin_only(self):
         link = 'App Store</a>'

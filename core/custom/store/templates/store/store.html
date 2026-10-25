@@ -24,7 +24,11 @@
     <div class="alert alert-warning" role="alert">
       {% if error == "unavailable" %}
       The App Store helper is not running on this server, so the list of Swizzin applications cannot be read (only root can read it).
+      {% if box_install %}
+      Install it with <code>ALTDASH_STORE=yes box upgrade altdash</code>, or check it with <code>systemctl status swizzin-store</code>.
+      {% else %}
       Install it with <code>store-helper/install.sh</code> (see the README), or check it with <code>systemctl status swizzin-store</code>.
+      {% endif %}
       {% else %}
       The App Store helper could not read the list of Swizzin applications. See <code>journalctl -u swizzin-store</code>.
       {% endif %}
