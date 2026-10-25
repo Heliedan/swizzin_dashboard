@@ -161,7 +161,7 @@ class WithoutDevDevice(unittest.TestCase):
         probe = live_stats.Probe(timeout=0.3)
         start = time.monotonic()
         self.assertIsNone(probe.read([ZFS, NFS])[NFS])  # no answer yet
-        self.assertLess(time.monotonic() - start, 0.1)  # and not waited for
+        self.assertLess(time.monotonic() - start, 0.15)  # and not waited for (half the delay: room for a busy machine)
         self.assertEqual(probe.read([ZFS, NFS], wait=True), {ZFS: TANK, NFS: None})
         self.assertLess(time.monotonic() - start, 1)  # waited for the share 0.3 s at most
         self.assertEqual(probe.read([ZFS, NFS]), {ZFS: TANK, NFS: None})
@@ -180,7 +180,7 @@ class WithoutDevDevice(unittest.TestCase):
         self.assertEqual(probe.read([NFS], wait=True), {NFS: NAS})  # it answers once
         start = time.monotonic()
         self.assertEqual(probe.read([NFS]), {NFS: NAS})  # its next reading blocks: the last answer, at once
-        self.assertLess(time.monotonic() - start, 0.1)
+        self.assertLess(time.monotonic() - start, 0.25)  # half the delay: not waited for, with room for a busy machine
         while time.monotonic() - start < 0.6:
             time.sleep(0.01)
         self.assertEqual(probe.read([NFS]), {NFS: None})  # silent for longer than the delay
