@@ -11,7 +11,7 @@ import re
 
 PASSWORD_FILES = {"/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow", "/etc/subuid", "/etc/subgid"}
 TRANSIENT = re.compile(r"(\.pid|\.lock|lockfile|\.sock|-wal|-shm|-journal|\.tmp)$", re.I)
-MARK = "campagne-"  # every witness file and trap of the campaign has this in its name
+MARK = "campaign-"  # every witness file and trap of the campaign has this in its name
 
 
 def expand(pattern, ctx):

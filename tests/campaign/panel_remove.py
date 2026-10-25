@@ -64,7 +64,7 @@ def main():
         preview = answer(received)
         out["preview"] = preview and {k: preview.get(k) for k in ("ok", "preview", "error")}
         ticket = (preview or {}).get("ticket")
-        sio.emit("remove", {"app": app, "ticket": ticket, "confirm": app.upper(), "password": password + "-faux"},
+        sio.emit("remove", {"app": app, "ticket": ticket, "confirm": app.upper(), "password": password + "-wrong"},
                  namespace="/store")
         out["wrong_password"] = (answer(received) or {}).get("error")
         sio.emit("remove", {"app": app, "ticket": ticket, "confirm": app + "x", "password": password}, namespace="/store")

@@ -44,7 +44,7 @@ VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "met
 
 
 def disk(pct, free="7.66 GiB", alert=None):
-    """One disk of the « live » event, as core/custom/live_stats.py sends it."""
+    """One disk of the "live" event, as core/custom/live_stats.py sends it."""
     return {"disktotal": "100.00 GiB", "diskused": "x GiB", "diskfree": free, "perutil": pct,
             "read": "0.00 B/s", "write": "0.00 B/s", "alert": alert}
 

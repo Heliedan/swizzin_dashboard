@@ -40,16 +40,16 @@ def record():
         removed["/etc/systemd/system/multi-user.target.wants/autobrr@%s.service" % user] = ["l", 0o777, 0, 0, 0, 0, "x"]
     removed.update({"/usr/bin/autobrr": F, "/usr/bin/autobrrctl": F, "/etc/systemd/system/autobrr@.service": F,
                     "/etc/nginx/apps/autobrr.conf": F, "/install/.autobrr.lock": F})
-    witness = {"/home/test/media/campagne-temoin.bin": "aa", "/home/alice/media/campagne-temoin.bin": "bb"}
+    witness = {"/home/test/media/campaign-witness.bin": "aa", "/home/alice/media/campaign-witness.bin": "bb"}
     return {
         "install": {"result": "installed", "web": "/autobrr/ 200"},
         "ctx": copy.deepcopy(CTX),
         "removal": {"result": "removed", "checks": [{"id": "lock", "ok": True}], "errors": [],
                     "preview": {"users": ["alice", "test"]}, "archive": "/var/backups/swizzin-store/autobrr-1.tar.gz",
-                    "skipped": [["/home/alice/.config/autobrr/campagne-lien-fichier", "a link"],
-                                ["/home/alice/.config/autobrr/campagne-lien-dossier", "a link"],
-                                ["/home/alice/.config/autobrr/campagne-fifo", "not a regular file"],
-                                ["/home/alice/.config/autobrr/campagne-autre.bin", "belongs to another user"]]},
+                    "skipped": [["/home/alice/.config/autobrr/campaign-link-file", "a link"],
+                                ["/home/alice/.config/autobrr/campaign-link-dir", "a link"],
+                                ["/home/alice/.config/autobrr/campaign-fifo", "not a regular file"],
+                                ["/home/alice/.config/autobrr/campaign-other.bin", "belongs to another user"]]},
         "d12": diff(removed=removed),
         "d02": diff(locks=[[".nginx.lock"], [".nginx.lock"]]),
         "witness": {"before": witness, "after": dict(witness)},
@@ -59,10 +59,10 @@ def record():
         "archive_report": {"mode": "0o600", "uid": 0, "dir_mode": "0o700", "dir_uid": 0, "manifest_bad": [],
                            "outside_manifest": [], "restore_txt": "1. Reinstall the app: box install autobrr",
                            "missing": [], "copied_hashes": ["11"]},
-        "traps": {"link_file": "/home/alice/.config/autobrr/campagne-lien-fichier",
-                  "link_dir": "/home/alice/.config/autobrr/campagne-lien-dossier",
-                  "fifo": "/home/alice/.config/autobrr/campagne-fifo", "foreign": "/home/alice/.config/autobrr/campagne-autre.bin",
-                  "target": "/home/test/media/campagne-film.mkv", "target_sha": "99"},
+        "traps": {"link_file": "/home/alice/.config/autobrr/campaign-link-file",
+                  "link_dir": "/home/alice/.config/autobrr/campaign-link-dir",
+                  "fifo": "/home/alice/.config/autobrr/campaign-fifo", "foreign": "/home/alice/.config/autobrr/campaign-other.bin",
+                  "target": "/home/test/media/campaign-film.mkv", "target_sha": "99"},
         "reinstall": {"result": "installed", "web": "/autobrr/ 200"},
     }
 
@@ -163,7 +163,7 @@ class Verdict(unittest.TestCase):
 
     def test_witnesses(self):
         r = record()
-        r["witness"]["after"]["/home/test/media/campagne-temoin.bin"] = None
+        r["witness"]["after"]["/home/test/media/campaign-witness.bin"] = None
         self.check(r, "fail", "the user's files changed")
         r = record()
         r["witness"] = {"before": {}, "after": {}}
@@ -215,14 +215,14 @@ class Verdict(unittest.TestCase):
     def test_the_traps(self):
         r = record()
         r["removal"]["skipped"] = r["removal"]["skipped"][1:]
-        self.check(r, "fail", "campagne-lien-fichier was not listed")
+        self.check(r, "fail", "campaign-link-file was not listed")
         r = record()
         r["archive_report"]["copied_hashes"] = ["99"]
         self.check(r, "fail", "followed a link")
 
     def test_what_stays_behind_is_reviewed(self):
         r = record()
-        r["d02"]["added"] = {"/opt/x/y": F, "/home/test/media/campagne-temoin.bin": F}
+        r["d02"]["added"] = {"/opt/x/y": F, "/home/test/media/campaign-witness.bin": F}
         r["d02"]["packages_added"] = {"libfoo": ["1", "ii"]}
         r["d02"]["added"]["/usr/lib/libfoo.so"] = F
         r["d02"]["owned_added"] = {"/usr/lib/libfoo.so": "libfoo"}  # shown with its package, not as a file
@@ -290,7 +290,7 @@ class Failures(unittest.TestCase):
         d = diff(removed={"/home/test/.config/autobrr/config.toml": F})
         self.assertEqual(self.failure("refused", "is locked", d12=d)["verdict"], "fail")
         self.assertEqual(self.failure("put-back", "", archives_after=["autobrr-1.tar.gz"])["verdict"], "fail")
-        self.assertEqual(self.failure("put-back", "", archives_after=["campagne-plein"])["verdict"], "pass")
+        self.assertEqual(self.failure("put-back", "", archives_after=["campaign-full"])["verdict"], "pass")
 
     def test_after_a_restart_the_last_job_tells(self):
         v = self.failure("put-back", "put back", removal={"errors": ["helper-closed"]},
