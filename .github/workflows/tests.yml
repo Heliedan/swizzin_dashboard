@@ -15,14 +15,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tests:
-    # The panel's target system: Ubuntu 24.04 and its own Python 3.12.
+  system:
+    # Every system Swizzin installs on, each with its own Python and node:
+    # the App Store service runs on the system's python3.
+    name: tests (${{ matrix.image }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:20.04", "ubuntu:22.04", "ubuntu:24.04", "debian:11", "debian:12"]
+    container: ${{ matrix.image }}
     steps:
+      - name: Install the system's Python, node and git
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          # Debian 11 is past its end of life: its security updates moved
+          # to archive.debian.org.
+          if grep -q bullseye /etc/os-release; then
+            sed -i 's#deb.debian.org/debian-security#archive.debian.org/debian-security#' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          fi
+          apt-get update -qq
+          apt-get install -y -qq python3 python3-venv python3-pip nodejs git procps > /dev/null
+          python3 --version
+          node --version
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+
+      # The tests run git in the checkout, which belongs to another user
+      # than root in the container.
+      - name: Let git work in the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # Swizzin at the commit the uninstaller was checked against (AUDITED in
       # store-helper/removable.py): tests/test_removable.py compares them.
@@ -36,6 +63,7 @@ jobs:
       - name: Install the panel's requirements
         run: |
           python3 -m venv venv
+          venv/bin/pip install --quiet --upgrade pip wheel  # as Swizzin does
           venv/bin/pip install --quiet -r requirements.txt
 
       # Each file runs on its own: some tests import the panel, which patches
@@ -61,3 +89,18 @@ jobs:
             echo "::error::Failed:$failed"
             exit 1
           fi
+
+  # The check the heliedan branch requires: green only when every system is.
+  # It runs even when one failed (a skipped required check would count as
+  # passed).
+  tests:
+    needs: system
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every system passed
+        env:
+          RESULT: ${{ needs.system.result }}
+        run: |
+          echo "systems: $RESULT"
+          test "$RESULT" = success

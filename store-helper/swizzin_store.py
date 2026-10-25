@@ -818,7 +818,7 @@ class Helper:
                 pid, status = job.pid, 0
             if pid == 0:
                 return
-            job.status = os.waitstatus_to_exitcode(status)
+            job.status = remove_runner.exit_code(status)
             job.exited_at = time.monotonic()
         while job.fd is not None:  # what the process wrote just before exiting
             try:
