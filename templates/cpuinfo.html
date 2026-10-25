@@ -1,6 +1,6 @@
-{# 2026-10-09 : carte CPU Info en direct. Remplace « System Info » et reprend l'uptime d'« At a Glance » (charge moyenne et top des programmes retirés le 2026-10-09).
-   Mise à jour chaque seconde par static/js/live_stats.js (événement « live ») ; voir le README. #}
-<div class="card border-dark mt-3" id="carte-cpu">
+{# Live CPU Info card. Replaces "System Info" and takes the uptime from "At a Glance" (without the load average and the top programs).
+   Updated every second by static/js/live_stats.js ("live" event); see the README. #}
+<div class="card border-dark mt-3" id="cpu-card">
     <div class="card-header d-flex justify-content-between align-items-center">CPU Info <span id="cpuindicator" class="systemindicator bg-secondary" style="height:14px;width:14px"></span></div>
     <div class="card-body">
         <div class="row">

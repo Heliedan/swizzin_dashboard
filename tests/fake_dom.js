@@ -168,9 +168,9 @@ function colours(el) {
 }
 
 function snapshot() {
-  const banner = document.getElementById('alerte-disque');
-  const summary = document.getElementById('alerte-disque-resume');
-  const card = document.getElementById('carte-disque');
+  const banner = document.getElementById('disk-alert');
+  const summary = document.getElementById('disk-alert-summary');
+  const card = document.getElementById('disk-card');
   const text = id => { const e = document.getElementById(id); return e ? e.textContent : null; };
   const disks = {};
   (card ? card.querySelectorAll('[id$="diskused"]') : []).forEach(el => {
@@ -192,7 +192,7 @@ function snapshot() {
     summary: summary && { role: summary.getAttribute('role'), live: summary.getAttribute('aria-live'),
                           cls: summary.className, text: summary.textContent },
     summaryChanges: summary ? changes.filter(n => summary.contains(n)).length : 0,
-    disks, liveMark: card ? card.hasAttribute('data-direct') : null,
+    disks, liveMark: card ? card.hasAttribute('data-live') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
   };
   changes = [];

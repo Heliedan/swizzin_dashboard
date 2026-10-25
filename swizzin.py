@@ -62,7 +62,7 @@ if app.config['RATELIMIT_ENABLED'] == True:
     )
 
 from core.util import *
-from core.custom.live_stats import live_stats, lire_seuils, niveau_alerte, peripheriques, a_part, SONDE  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
+from core.custom.live_stats import live_stats, read_thresholds, alert_level, mount_devices, mounts_read_apart, PROBE  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
 try:  # App Store page (core/custom/store, see the README): a problem there must not stop the panel
     from core.custom import store as app_store
     app_store.register(app, socketio, htpasswd)
@@ -388,17 +388,17 @@ def disk_free(user):
     mounts = get_mounts()
     # Disk almost full alert (see the README): the same levels as the live cards, so that both paint a disk alike.
     # An invalid setting is logged by the live cards, not here at every request.
-    thresholds = lire_seuils(app.config)
+    thresholds = read_thresholds(app.config)
     # Mounts without a /dev/ device (ZFS, NFS...), and disks mounted inside one, are read apart, as for the live cards:
     # a network share that stopped answering is left out after a few seconds instead of freezing the whole panel
     # (see the README).
-    apart = SONDE.releve(a_part(peripheriques(mounts)), attendre=True)
+    apart = PROBE.read(mounts_read_apart(mount_devices(mounts)), wait=True)
     data = {}
     for mount in mounts:
         try:
             if mount in apart:
                 if apart[mount] is None:
-                    raise OSError("unreadable, or no answer within %g seconds" % SONDE.delai)
+                    raise OSError("unreadable, or no answer within %g seconds" % PROBE.timeout)
                 total, used, free, usage = apart[mount]
             else:
                 total, used, free, usage = disk_usage(mount)
@@ -407,7 +407,7 @@ def disk_free(user):
             app.logger.warning("disk stats: skipping %s (%s)", mount, e)
             continue
         data[mount] = {"disktotal": total, "diskused": used, "diskfree": free, "perutil": usage,
-                       "alert": niveau_alerte(float(usage), thresholds)}
+                       "alert": alert_level(float(usage), thresholds)}
     return flask.jsonify(data)
 
 @app.route('/stats/quota')

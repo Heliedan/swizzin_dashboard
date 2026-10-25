@@ -1,39 +1,39 @@
-/* 2026-10-09 : mise en page du tableau de bord avec les cartes en direct (voir le README).
-   Le bloc CPU Info → RAM Info → Disk Info reste groupé dans les mises en page à 1 ou 2 colonnes (card-columns d'origine). */
+/* Dashboard layout with the live cards (see the README).
+   The CPU Info → RAM Info → Disk Info block stays together in the 1 or 2 column layouts (original card-columns). */
 .card-columns > .live-stack {
   display: inline-block;
   width: 100%;
 }
 
-/* Grand écran (3 colonnes, à partir de 1400 px comme dans swizzin.css) : CPU Info à gauche, RAM Info + Disk Info +
-   Service Info au milieu, Network Info à droite, pour que tout tienne sans faire défiler. */
+/* Wide screen (3 columns, from 1400 px as in swizzin.css): CPU Info on the left, RAM Info + Disk Info +
+   Service Info in the middle, Network Info on the right, so that everything fits without scrolling. */
 @media (min-width: 1400px) {
   .card-columns.live-layout {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: auto auto auto 1fr;   /* la ligne « 1fr » absorbe la hauteur des colonnes 1 et 3 */
-    column-gap: 1.25rem;                       /* même écart que card-columns */
+    grid-template-rows: auto auto auto 1fr;   /* the "1fr" row takes up the height of columns 1 and 3 */
+    column-gap: 1.25rem;                       /* same gap as card-columns */
     align-items: start;
   }
   .card-columns.live-layout > .live-stack { display: contents; }
-  .live-layout #carte-cpu    { grid-column: 1; grid-row: 1 / 5; }
-  .live-layout #carte-ram    { grid-column: 2; grid-row: 1; }
-  .live-layout #carte-disque { grid-column: 2; grid-row: 2; }
-  .live-layout > .live-stack + .card { grid-column: 2; grid-row: 3; }   /* Service Info (carte qui suit le bloc) */
-  .live-layout > .card:last-child    { grid-column: 3; grid-row: 1 / 5; } /* Network Info (dernière carte) */
+  .live-layout #cpu-card    { grid-column: 1; grid-row: 1 / 5; }
+  .live-layout #ram-card    { grid-column: 2; grid-row: 1; }
+  .live-layout #disk-card   { grid-column: 2; grid-row: 2; }
+  .live-layout > .live-stack + .card { grid-column: 2; grid-row: 3; }   /* Service Info (the card after the block) */
+  .live-layout > .card:last-child    { grid-column: 3; grid-row: 1 / 5; } /* Network Info (last card) */
 }
-/* Disque illisible (débranché, partage réseau perdu...) : symbole ⊘ gris barré, sans couleur, car les couleurs
-   des pastilles indiquent le remplissage. Le badge « UNAVAILABLE » de la ligne donne l'explication en clair. */
+/* Unreadable disk (unplugged, network share lost...): ⊘ symbol, grey and struck through, with no colour, since the
+   colours of the dots tell how full a disk is. The "UNAVAILABLE" badge of the line explains it in plain words. */
 .systemindicator.disk-unavailable { background-color: transparent !important; border: 2px solid #999; box-sizing: border-box; position: relative; display: inline-block; }
 .systemindicator.disk-unavailable::after { content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: #999; transform: rotate(45deg); }
-/* Carte Disk Info en direct : un encart léger par disque (contour fin), sans changer le tableau d'origine.
-   La 1re ligne de chaque bloc est l'espaceur d'origine (hors encart), d'où les sélecteurs à partir de la 2e. */
-#carte-disque table { border-collapse: separate; border-spacing: 0; }
-#carte-disque tbody.diskwidget tr:nth-child(2) td { border-top: 1px solid rgba(255, 255, 255, 0.15); }
-#carte-disque tbody.diskwidget tr:last-child td { border-bottom: 1px solid rgba(255, 255, 255, 0.15); padding-bottom: 0.4rem; }
-#carte-disque tbody.diskwidget tr:not(:first-child) td:first-child { border-left: 1px solid rgba(255, 255, 255, 0.15); }
-#carte-disque tbody.diskwidget tr:not(:first-child) td:last-child { border-right: 1px solid rgba(255, 255, 255, 0.15); }
-#carte-disque tbody.diskwidget tr:nth-child(2) td:first-child { border-top-left-radius: 0.25rem; }
-#carte-disque tbody.diskwidget tr:nth-child(2) td:last-child { border-top-right-radius: 0.25rem; }
-#carte-disque tbody.diskwidget tr:last-child td:first-child { border-bottom-left-radius: 0.25rem; }
-#carte-disque tbody.diskwidget tr:last-child td:last-child { border-bottom-right-radius: 0.25rem; }
+/* Live Disk Info card: a light box per disk (thin outline), without changing the original table.
+   The 1st row of each block is the original spacer (outside the box), hence the selectors from the 2nd one. */
+#disk-card table { border-collapse: separate; border-spacing: 0; }
+#disk-card tbody.diskwidget tr:nth-child(2) td { border-top: 1px solid rgba(255, 255, 255, 0.15); }
+#disk-card tbody.diskwidget tr:last-child td { border-bottom: 1px solid rgba(255, 255, 255, 0.15); padding-bottom: 0.4rem; }
+#disk-card tbody.diskwidget tr:not(:first-child) td:first-child { border-left: 1px solid rgba(255, 255, 255, 0.15); }
+#disk-card tbody.diskwidget tr:not(:first-child) td:last-child { border-right: 1px solid rgba(255, 255, 255, 0.15); }
+#disk-card tbody.diskwidget tr:nth-child(2) td:first-child { border-top-left-radius: 0.25rem; }
+#disk-card tbody.diskwidget tr:nth-child(2) td:last-child { border-top-right-radius: 0.25rem; }
+#disk-card tbody.diskwidget tr:last-child td:first-child { border-bottom-left-radius: 0.25rem; }
+#disk-card tbody.diskwidget tr:last-child td:last-child { border-bottom-right-radius: 0.25rem; }

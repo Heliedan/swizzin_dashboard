@@ -19,22 +19,22 @@
   {% endif %}
   <!-- #page-content-wrapper -->
   <div class="container-fluid">
-      {# 2026-10-20 : bandeau « disque bientôt plein », rempli par static/js/live_stats.js. Même condition que la
-         carte Disk Info : qui ne voit pas la carte ne voit pas le bandeau. Voir le README.
-         Ses lignes visibles changent presque chaque seconde (espace libre) : elles ne sont pas une zone « live ».
-         Les lecteurs d'écran lisent seulement le résumé caché qui suit, toujours présent et vide au départ. #}
-      {% set carte_disque = (quota == False or config.ADMIN_USER == user) %}
-      {% if carte_disque %}
-        <div id="alerte-disque"></div>
-        <div id="alerte-disque-resume" class="sr-only" role="status" aria-live="polite"></div>
+      {# "Disk almost full" banner, filled by static/js/live_stats.js. Same condition as the
+         Disk Info card: whoever does not see the card does not see the banner. See the README.
+         Its visible lines change nearly every second (free space): they are not a "live" region.
+         Screen readers only read the hidden summary that follows, always there and empty at first. #}
+      {% set disk_card = (quota == False or config.ADMIN_USER == user) %}
+      {% if disk_card %}
+        <div id="disk-alert"></div>
+        <div id="disk-alert-summary" class="sr-only" role="status" aria-live="polite"></div>
       {% endif %}
       <div class="card-columns live-layout">
-          {# 2026-10-09 : CPU Info (ex-System Info), RAM Info puis Disk Info, groupées et actualisées chaque seconde ;
-             « At a Glance » retirée (ses pastilles sont dans chaque carte). Voir le README. #}
+          {# CPU Info (formerly System Info), RAM Info then Disk Info, grouped and updated every second;
+             no "At a Glance" card (its dots are in each card). See the README. #}
           <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
             {% include 'cpuinfo.html' %}
             {% include 'raminfo_live.html' %}
-            {% if carte_disque %}
+            {% if disk_card %}
               {% include 'diskinfo_live.html' %}
             {% endif %}
           </div>

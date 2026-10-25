@@ -1,233 +1,233 @@
-/* 2026-10-09 : met à jour chaque seconde les cartes CPU Info, RAM Info et Disk Info (événement « live » du websocket).
-   Mêmes identifiants et, pour CPU et RAM, mêmes seuils (75 % / 90 %) que les scripts d'origine du panel
+/* Updates the CPU Info, RAM Info and Disk Info cards every second ("live" event of the websocket).
+   Same element ids and, for CPU and RAM, same thresholds (75 % / 90 %) as the panel's original scripts
    (templates/macros.html).
-   2026-10-20 : bandeau « disque bientôt plein ». Les disques prennent la couleur de leur niveau d'alerte, avec les
-   seuils DISK_WARN_PERCENT et DISK_CRIT_PERCENT de swizzin.cfg. Voir le README. */
+   "Disk almost full" banner: the disks take the colour of their alert level, with the
+   DISK_WARN_PERCENT and DISK_CRIT_PERCENT thresholds of swizzin.cfg. See the README. */
 (function () {
   'use strict';
 
-  function niveau(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
+  function levelClass(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
 
-  // classe : couleur imposée (disques), sinon celle des seuils 75 % / 90 % (CPU, RAM).
-  function couleur(el, pct, classe) {
+  // cls: a forced colour (disks), else the one of the 75 % / 90 % thresholds (CPU, RAM).
+  function setColour(el, pct, cls) {
     if (!el) { return; }
     el.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary', 'disk-unavailable');
-    el.classList.add(classe || niveau(pct));
+    el.classList.add(cls || levelClass(pct));
   }
 
-  function barre(el, pct, classe) {
+  function setBar(el, pct, cls) {
     if (!el) { return; }
     var p = Math.max(0, Math.min(100, Number(pct) || 0));
     el.style.width = p + '%';
     el.setAttribute('aria-valuenow', Math.trunc(p));
-    couleur(el, p, classe);
+    setColour(el, p, cls);
   }
 
-  // Couleur d'un disque : celle de son niveau d'alerte, calculé par le serveur avec DISK_WARN_PERCENT et
-  // DISK_CRIT_PERCENT (swizzin.cfg). Mêmes seuils et mêmes couleurs que le bandeau, pas l'échelle 75 % / 90 %.
-  function couleurDisque(alerte) {
-    return alerte === 'critical' ? 'bg-danger' : (alerte === 'warning' ? 'bg-warning' : 'bg-success');
+  // Colour of a disk: the one of its alert level, computed by the server with DISK_WARN_PERCENT and
+  // DISK_CRIT_PERCENT (swizzin.cfg). Same thresholds and same colours as the banner, not the 75 % / 90 % scale.
+  function diskColour(level) {
+    return level === 'critical' ? 'bg-danger' : (level === 'warning' ? 'bg-warning' : 'bg-success');
   }
 
-  function texte(id, valeur) {
+  function setText(id, value) {
     var el = document.getElementById(id);
-    if (el) { el.textContent = valeur; }
+    if (el) { el.textContent = value; }
   }
 
-  function parCoeur(valeurs) {
-    var boite = document.getElementById('cpupercore');
-    if (!boite) { return; }
-    if (boite.children.length !== valeurs.length) {  // construit une fois les lignes « Core n »
-      boite.textContent = '';
-      valeurs.forEach(function (v, i) {
-        var ligne = document.createElement('div');
-        ligne.className = 'd-flex align-items-center small mb-1';
-        var nom = document.createElement('span');
-        nom.style.width = '4.5em';
-        nom.textContent = 'Core ' + (i + 1);
-        var cadre = document.createElement('div');
-        cadre.className = 'progress flex-grow-1 mx-2';
-        cadre.style.height = '8px';
+  function perCore(values) {
+    var box = document.getElementById('cpupercore');
+    if (!box) { return; }
+    if (box.children.length !== values.length) {  // builds the "Core n" rows once
+      box.textContent = '';
+      values.forEach(function (v, i) {
+        var row = document.createElement('div');
+        row.className = 'd-flex align-items-center small mb-1';
+        var name = document.createElement('span');
+        name.style.width = '4.5em';
+        name.textContent = 'Core ' + (i + 1);
+        var frame = document.createElement('div');
+        frame.className = 'progress flex-grow-1 mx-2';
+        frame.style.height = '8px';
         var b = document.createElement('div');
         b.className = 'progress-bar bg-success';
         b.setAttribute('role', 'progressbar');
-        cadre.appendChild(b);
+        frame.appendChild(b);
         var val = document.createElement('span');
         val.className = 'text-right';
         val.style.width = '3.5em';
-        ligne.appendChild(nom); ligne.appendChild(cadre); ligne.appendChild(val);
-        boite.appendChild(ligne);
+        row.appendChild(name); row.appendChild(frame); row.appendChild(val);
+        box.appendChild(row);
       });
     }
-    valeurs.forEach(function (v, i) {
-      var ligne = boite.children[i];
-      barre(ligne.children[1].firstChild, v);
-      ligne.children[2].textContent = v + '%';
+    values.forEach(function (v, i) {
+      var row = box.children[i];
+      setBar(row.children[1].firstChild, v);
+      row.children[2].textContent = v + '%';
     });
   }
 
   function cpu(c) {
-    texte('cpuused', c.used);
-    texte('cpuidle', c.idle);
-    texte('cpucores', c.cores);
-    texte('cpupercent', c.used);
-    texte('cpumodel', c.model + (c.freq ? ' · ' + c.freq : ''));
-    barre(document.getElementById('cpuprogress'), c.used);
-    couleur(document.getElementById('cpuindicator'), Number(c.used));
+    setText('cpuused', c.used);
+    setText('cpuidle', c.idle);
+    setText('cpucores', c.cores);
+    setText('cpupercent', c.used);
+    setText('cpumodel', c.model + (c.freq ? ' · ' + c.freq : ''));
+    setBar(document.getElementById('cpuprogress'), c.used);
+    setColour(document.getElementById('cpuindicator'), Number(c.used));
     var ci = document.getElementById('cpuindicator'); if (ci) { ci.title = 'CPU : ' + c.used + ' %'; }
-    parCoeur(c.percore);
-    texte('cpuuser', c.user);
-    texte('cpusystem', c.system);
-    texte('cpuiowait', c.iowait);
-    texte('cpusteal', c.steal);
+    perCore(c.percore);
+    setText('cpuuser', c.user);
+    setText('cpusystem', c.system);
+    setText('cpuiowait', c.iowait);
+    setText('cpusteal', c.steal);
   }
 
   function ram(r) {
-    texte('ramused', r.ramused);
-    texte('ramfree', r.ramfree);
-    texte('ramtotal', r.ramtotal);
-    texte('rampercent', r.perutil);
-    barre(document.getElementById('ramprogress'), r.perutil);
-    couleur(document.getElementById('ramindicator'), Number(r.perutil));
+    setText('ramused', r.ramused);
+    setText('ramfree', r.ramfree);
+    setText('ramtotal', r.ramtotal);
+    setText('rampercent', r.perutil);
+    setBar(document.getElementById('ramprogress'), r.perutil);
+    setColour(document.getElementById('ramindicator'), Number(r.perutil));
     var ri = document.getElementById('ramindicator'); if (ri) { ri.title = 'RAM : ' + r.perutil + ' %'; }
   }
 
-  function etatDisque(m, indisponible) {  // badge « UNAVAILABLE » au-dessus du nom du disque, ligne du % masquée
+  function setDiskState(m, unavailable) {  // "UNAVAILABLE" badge above the disk's name, % line hidden
     var cell = document.getElementById(m + 'diskused');
-    var nom = cell && cell.parentElement ? cell.parentElement.firstElementChild : null;
-    var badge = nom ? nom.querySelector('.disk-badge') : null;
-    if (indisponible && nom && !badge) {  // au-dessus du nom du disque
+    var name = cell && cell.parentElement ? cell.parentElement.firstElementChild : null;
+    var badge = name ? name.querySelector('.disk-badge') : null;
+    if (unavailable && name && !badge) {  // above the disk's name
       badge = document.createElement('div');
       badge.className = 'disk-badge mb-1';
-      var etiquette = document.createElement('span');
-      etiquette.className = 'badge badge-danger';
-      etiquette.textContent = 'UNAVAILABLE';
-      badge.appendChild(etiquette);
-      nom.insertBefore(badge, nom.firstChild);
+      var label = document.createElement('span');
+      label.className = 'badge badge-danger';
+      label.textContent = 'UNAVAILABLE';
+      badge.appendChild(label);
+      name.insertBefore(badge, name.firstChild);
     }
-    if (!indisponible && badge) { badge.parentNode.removeChild(badge); }
-    var pct = document.getElementById(m + 'diskpercent');  // « 87.00% » : on vide la ligne sans la masquer (garde le contour)
+    if (!unavailable && badge) { badge.parentNode.removeChild(badge); }
+    var pct = document.getElementById(m + 'diskpercent');  // "87.00%": the line is emptied, not hidden (keeps the outline)
     if (pct) {
-      if (indisponible) { pct.textContent = ''; }
-      if (pct.nextSibling && pct.nextSibling.nodeType === 3) { pct.nextSibling.nodeValue = indisponible ? '' : '%'; }
+      if (unavailable) { pct.textContent = ''; }
+      if (pct.nextSibling && pct.nextSibling.nodeType === 3) { pct.nextSibling.nodeValue = unavailable ? '' : '%'; }
     }
   }
 
-  function disques(d) {
-    // Disques affichés sur la page mais absents des données (démontés depuis le chargement) : indisponibles.
-    var carte = document.getElementById('carte-disque');
-    if (carte) {
-      // 1er relevé en direct reçu : le relevé /stats/disk de chaque minute (templates/macros.html) s'arrête.
-      if (!carte.hasAttribute('data-direct')) { carte.setAttribute('data-direct', ''); }
-      Array.prototype.forEach.call(carte.querySelectorAll('[id$="diskused"]'), function (el) {
+  function disks(d) {
+    // Disks shown on the page but missing from the data (unmounted since the page loaded): unavailable.
+    var card = document.getElementById('disk-card');
+    if (card) {
+      // 1st live reading received: the /stats/disk poll of every minute (templates/macros.html) stops.
+      if (!card.hasAttribute('data-live')) { card.setAttribute('data-live', ''); }
+      Array.prototype.forEach.call(card.querySelectorAll('[id$="diskused"]'), function (el) {
         var m = el.id.slice(0, -'diskused'.length);
         if (!(m in d)) { d[m] = { unavailable: true }; }
       });
     }
     Object.keys(d).forEach(function (m) {
       var x = d[m];
-      if (x.unavailable) {  // disque illisible (débranché, partage réseau perdu...) : pas de chiffres périmés
-        ['diskused', 'diskfree', 'disktotal'].forEach(function (k) { texte(m + k, ''); });
-        ['diskread', 'diskwrite'].forEach(function (k) { texte(m + k, '—'); });
+      if (x.unavailable) {  // unreadable disk (unplugged, network share lost...): no stale numbers
+        ['diskused', 'diskfree', 'disktotal'].forEach(function (k) { setText(m + k, ''); });
+        ['diskread', 'diskwrite'].forEach(function (k) { setText(m + k, '—'); });
         var b = document.getElementById(m + 'diskprogress');
         if (b) { b.style.width = '0%'; b.setAttribute('aria-valuenow', 0); }
-        etatDisque(m, true);
-        // Les pastilles disent le remplissage : un disque illisible n'a pas de couleur mais le symbole ⊘ (gris barré).
+        setDiskState(m, true);
+        // The dots tell how full a disk is: an unreadable disk has no colour but the ⊘ symbol (grey, struck through).
         var p = document.getElementById(m + 'indicator');
         if (p) { p.classList.remove('bg-success', 'bg-warning', 'bg-danger', 'bg-secondary'); p.classList.add('disk-unavailable'); p.title = m + ' : unavailable'; }
         return;
       }
-      etatDisque(m, false);
-      texte(m + 'diskused', x.diskused);
-      texte(m + 'diskfree', x.diskfree);
-      texte(m + 'disktotal', x.disktotal);
-      texte(m + 'diskpercent', x.perutil);
-      texte(m + 'diskread', x.read || '—');  // pas de débits sans périphérique /dev/ (ZFS, NFS...)
-      texte(m + 'diskwrite', x.write || '—');
-      barre(document.getElementById(m + 'diskprogress'), x.perutil, couleurDisque(x.alert));
+      setDiskState(m, false);
+      setText(m + 'diskused', x.diskused);
+      setText(m + 'diskfree', x.diskfree);
+      setText(m + 'disktotal', x.disktotal);
+      setText(m + 'diskpercent', x.perutil);
+      setText(m + 'diskread', x.read || '—');  // no speeds without a /dev/ device (ZFS, NFS...)
+      setText(m + 'diskwrite', x.write || '—');
+      setBar(document.getElementById(m + 'diskprogress'), x.perutil, diskColour(x.alert));
       var ind = document.getElementById(m + 'indicator');
-      couleur(ind, Number(x.perutil), couleurDisque(x.alert));
-      if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // au survol : le remplissage en clair
+      setColour(ind, Number(x.perutil), diskColour(x.alert));
+      if (ind) { ind.title = m + ' : ' + x.perutil + ' %'; }  // on hover: how full it is, in plain text
     });
   }
 
-  // 2026-10-20 : bandeau « disque bientôt plein » en haut du tableau de bord, un encart par disque de la carte
-  // Disk Info qui a atteint un seuil (avertissement en orange, critique en rouge). Il suit chaque relevé :
-  // il apparaît et disparaît en direct. Le chemin de montage vient du système (espaces, caractères spéciaux) :
-  // il n'est jamais inséré comme du HTML, seulement par textContent.
-  // Lecteurs d'écran : pendant un téléchargement, l'espace libre d'une ligne change presque chaque seconde. Les
-  // lignes visibles ne sont donc pas une zone « live ». Seul le résumé caché #alerte-disque-resume (role="status"
-  // aria-live="polite", templates/index.html) est lu : il ne nomme que les disques en alerte et leur niveau, il ne
-  // change que quand un disque entre en alerte, en sort ou change de niveau. Rien n'est touché sans changement.
-  // Un disque illisible (UNAVAILABLE) quitte le bandeau, mais son remplissage est inconnu : il est peut-être
-  // toujours plein (partage réseau mort), le résumé ne dit donc jamais qu'il ne l'est plus.
-  function alertes(d) {
-    var bandeau = document.getElementById('alerte-disque');
-    var resume = document.getElementById('alerte-disque-resume');
-    var carte = document.getElementById('carte-disque');
-    if (!bandeau || !carte) { return; }  // pas de carte Disk Info pour cet utilisateur : pas de bandeau non plus
-    var lignes = [], illisibles = [];
+  // "Disk almost full" banner at the top of the dashboard, one box per disk of the Disk Info card
+  // that reached a threshold (warning in orange, critical in red). It follows each reading:
+  // it appears and disappears live. The mount path comes from the system (spaces, special characters):
+  // it is never inserted as HTML, only through textContent.
+  // Screen readers: during a download, the free space of a line changes nearly every second. So the
+  // visible lines are not a "live" region. Only the hidden summary #disk-alert-summary (role="status"
+  // aria-live="polite", templates/index.html) is read: it names only the disks in alert and their level, it
+  // changes only when a disk enters an alert, leaves it or changes level. Nothing is touched without a change.
+  // An unreadable disk (UNAVAILABLE) leaves the banner, but how full it is is unknown: it may
+  // still be full (dead network share), so the summary never says it no longer is.
+  function alerts(d) {
+    var banner = document.getElementById('disk-alert');
+    var summary = document.getElementById('disk-alert-summary');
+    var card = document.getElementById('disk-card');
+    if (!banner || !card) { return; }  // no Disk Info card for this user: no banner either
+    var lines = [], unreadable = [];
     Object.keys(d).forEach(function (m) {
       var x = d[m];
-      if (!carte.contains(document.getElementById(m + 'diskused'))) { return; }  // disque absent de la carte
-      if (x.unavailable) { illisibles.push(m); return; }
+      if (!card.contains(document.getElementById(m + 'diskused'))) { return; }  // disk missing from the card
+      if (x.unavailable) { unreadable.push(m); return; }
       if (x.alert !== 'warning' && x.alert !== 'critical') { return; }
-      var pct = Math.trunc(Number(x.perutil) || 0);  // tronqué : « 90% » n'apparaît jamais sous le seuil de 90
-      lignes.push({ m: m, alerte: x.alert, pct: pct,
-                    texte: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
+      var pct = Math.trunc(Number(x.perutil) || 0);  // truncated: "90%" never shows below the threshold of 90
+      lines.push({ m: m, level: x.alert, pct: pct,
+                   text: 'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)' });
     });
-    lignes.sort(function (a, b) { return b.pct - a.pct; });  // le disque le plus plein en premier
-    lignes.forEach(function (l, i) {
-      // text-break : un chemin long sans espace passe à la ligne au lieu de déborder sur un téléphone.
-      var classe = 'alert mt-3 mb-0 text-break ' + (l.alerte === 'critical' ? 'alert-danger' : 'alert-warning');
-      var encart = bandeau.children[i];
-      if (!encart) {
-        encart = document.createElement('div');
-        encart.className = classe;
-        encart.textContent = l.texte;
-        bandeau.appendChild(encart);
+    lines.sort(function (a, b) { return b.pct - a.pct; });  // the fullest disk first
+    lines.forEach(function (l, i) {
+      // text-break: a long path with no space wraps instead of running out of the screen on a phone.
+      var cls = 'alert mt-3 mb-0 text-break ' + (l.level === 'critical' ? 'alert-danger' : 'alert-warning');
+      var item = banner.children[i];
+      if (!item) {
+        item = document.createElement('div');
+        item.className = cls;
+        item.textContent = l.text;
+        banner.appendChild(item);
         return;
       }
-      if (encart.className !== classe) { encart.className = classe; }
-      if (encart.textContent !== l.texte) { encart.textContent = l.texte; }
+      if (item.className !== cls) { item.className = cls; }
+      if (item.textContent !== l.text) { item.textContent = l.text; }
     });
-    while (bandeau.children.length > lignes.length) {  // disques revenus sous le seuil, démontés ou illisibles
-      bandeau.removeChild(bandeau.lastElementChild);
+    while (banner.children.length > lines.length) {  // disks back below the threshold, unmounted or unreadable
+      banner.removeChild(banner.lastElementChild);
     }
-    if (resume) {
-      var phrase = resumer(lignes, illisibles, resume.textContent);
-      if (resume.textContent !== phrase) { resume.textContent = phrase; }
+    if (summary) {
+      var sentence = summarize(lines, unreadable, summary.textContent);
+      if (summary.textContent !== sentence) { summary.textContent = sentence; }
     }
   }
 
-  // Résumé pour les lecteurs d'écran : les disques rouges puis orange, chacun dans l'ordre des chemins (l'ordre
-  // du remplissage changerait sans qu'aucun niveau ne change). Ni pourcentage ni espace libre. Vide tant
-  // qu'aucun disque n'a été en alerte ; quand le dernier en sort, il le dit, sauf pour les disques illisibles :
-  // ceux-là sont nommés, sans dire qu'ils ne sont plus pleins.
-  function resumer(lignes, illisibles, avant) {
-    var niveaux = { critical: [], warning: [] };
-    lignes.forEach(function (l) { niveaux[l.alerte].push(l.m); });
-    var parties = [];
-    if (niveaux.critical.length) { parties.push('critical: ' + niveaux.critical.sort().join(', ')); }
-    if (niveaux.warning.length) { parties.push('warning: ' + niveaux.warning.sort().join(', ')); }
-    if (parties.length) { return 'Disk almost full, ' + parties.join('; '); }
-    if (!avant) { return ''; }
-    if (illisibles.length) {
-      return 'No readable disk is almost full anymore. Unavailable: ' + illisibles.sort().join(', ') + '.';
+  // Summary for screen readers: the red disks then the orange ones, each in the order of their paths (the order
+  // of how full they are would change without any level changing). Neither percentage nor free space. Empty as
+  // long as no disk has been in alert; when the last one leaves, it says so, except for unreadable disks:
+  // those are named, without saying that they are no longer full.
+  function summarize(lines, unreadable, previous) {
+    var levels = { critical: [], warning: [] };
+    lines.forEach(function (l) { levels[l.level].push(l.m); });
+    var parts = [];
+    if (levels.critical.length) { parts.push('critical: ' + levels.critical.sort().join(', ')); }
+    if (levels.warning.length) { parts.push('warning: ' + levels.warning.sort().join(', ')); }
+    if (parts.length) { return 'Disk almost full, ' + parts.join('; '); }
+    if (!previous) { return ''; }
+    if (unreadable.length) {
+      return 'No readable disk is almost full anymore. Unavailable: ' + unreadable.sort().join(', ') + '.';
     }
     return 'No disk is almost full anymore.';
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    var bloc = document.querySelector('.live-stack');
-    if (!bloc || typeof io === 'undefined') { return; }
-    var base = bloc.getAttribute('data-urlbase') || '';
+    var stack = document.querySelector('.live-stack');
+    if (!stack || typeof io === 'undefined') { return; }
+    var base = stack.getAttribute('data-urlbase') || '';
     var socket = io.connect(window.location.protocol + '//' + document.domain + ':' + window.location.port + '/websocket',
                             { path: base + '/socket.io' });
     socket.on('live', function (d) {
       if (d.cpu) { cpu(d.cpu); }
       if (d.ram) { ram(d.ram); }
-      if (d.disks) { disques(d.disks); alertes(d.disks); }
+      if (d.disks) { disks(d.disks); alerts(d.disks); }
     });
   });
 })();

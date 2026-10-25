@@ -116,7 +116,7 @@ app is marked tested (the campaign is what decides it): `--table`, a test option
 ```bash
 python3 tests/campaign/remove.py --docker "sudo -n docker" --out results-remove/                 # everything
 python3 tests/campaign/remove.py --docker "sudo -n docker" --out results-remove/ cycles          # one group
-python3 tests/campaign/remove.py --docker "sudo -n docker" --out results-remove/ --only plex panne-stop-copie
+python3 tests/campaign/remove.py --docker "sudo -n docker" --out results-remove/ --only plex failure-stop-copy
 ```
 
 Images with prerequisites installed (rTorrent for Flood, qBittorrent for qui, Plex for Tautulli, autobrr

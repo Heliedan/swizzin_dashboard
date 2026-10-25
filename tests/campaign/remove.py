@@ -71,49 +71,49 @@ RESTORE = {
 HOLD_DPKG_LOCK = ("nohup python3 -c 'import fcntl, os, time; fd = os.open(\"/var/lib/dpkg/lock-frontend\", os.O_RDWR);"
                   " fcntl.lockf(fd, fcntl.LOCK_EX); time.sleep(900)' >/dev/null 2>&1 & sleep 1")
 SLOW_APT_DAILY = ("mkdir -p /run/systemd/system/apt-daily.service.d && printf '[Service]\\nExecStartPre=/bin/sleep 900\\n'"
-                  " > /run/systemd/system/apt-daily.service.d/campagne.conf && systemctl daemon-reload &&"
+                  " > /run/systemd/system/apt-daily.service.d/campaign.conf && systemctl daemon-reload &&"
                   " systemctl start --no-block apt-daily.service && sleep 2 && systemctl is-active apt-daily.service || true")
 FAKE_APT = "cp /bin/sleep /root/apt-get && (nohup /root/apt-get 900 >/dev/null 2>&1 &) && sleep 1"
 PAUSE = lambda seconds: ["--test-env", "STORE_TEST_PAUSE=copy:%d" % seconds]  # noqa: E731
 
 NEIGHBOURS = [
-    dict(key="voisin-qbittorrent-qui", app="qbittorrent", preinstall=["qbittorrent", "qui"], watch=["qui"]),
-    dict(key="voisin-qbittorrent-autobrr", app="qbittorrent", preinstall=["autobrr"], watch=["autobrr"]),
-    dict(key="voisin-autobrr-qbittorrent", app="autobrr", preinstall=["qbittorrent"], watch=["qbittorrent"]),
-    dict(key="voisin-plex-tautulli", app="plex", preinstall=["plex", "tautulli"], watch=["tautulli"]),
-    dict(key="voisin-prowlarr-radarr", app="prowlarr", preinstall=["radarr"], watch=["radarr"]),
-    dict(key="voisin-radarr-prowlarr", app="radarr", preinstall=["prowlarr"], watch=["prowlarr"]),
-    dict(key="voisin-qbittorrent-deluge", app="qbittorrent", preinstall=["qbittorrent", "deluge"], watch=["deluge"],
+    dict(key="neighbour-qbittorrent-qui", app="qbittorrent", preinstall=["qbittorrent", "qui"], watch=["qui"]),
+    dict(key="neighbour-qbittorrent-autobrr", app="qbittorrent", preinstall=["autobrr"], watch=["autobrr"]),
+    dict(key="neighbour-autobrr-qbittorrent", app="autobrr", preinstall=["qbittorrent"], watch=["qbittorrent"]),
+    dict(key="neighbour-plex-tautulli", app="plex", preinstall=["plex", "tautulli"], watch=["tautulli"]),
+    dict(key="neighbour-prowlarr-radarr", app="prowlarr", preinstall=["radarr"], watch=["radarr"]),
+    dict(key="neighbour-radarr-prowlarr", app="radarr", preinstall=["prowlarr"], watch=["prowlarr"]),
+    dict(key="neighbour-qbittorrent-deluge", app="qbittorrent", preinstall=["qbittorrent", "deluge"], watch=["deluge"],
          expect="refused", text="conflict"),  # refused at the preview since f4dc9c4; the card names Deluge
 ]
 
 FAILURES = [
-    dict(key="panne-verrou-dpkg", before=HOLD_DPKG_LOCK, expect="refused", text="is locked"),
-    dict(key="panne-apt-daily", before=SLOW_APT_DAILY, expect="refused", text="automatic system updates"),
-    dict(key="panne-processus-apt", before=FAKE_APT, expect="refused", text="apt-get is running"),
-    dict(key="panne-script-modifie", before="echo '# campagne' >> /etc/swizzin/scripts/remove/autobrr.sh",
+    dict(key="failure-dpkg-lock", before=HOLD_DPKG_LOCK, expect="refused", text="is locked"),
+    dict(key="failure-apt-daily", before=SLOW_APT_DAILY, expect="refused", text="automatic system updates"),
+    dict(key="failure-apt-process", before=FAKE_APT, expect="refused", text="apt-get is running"),
+    dict(key="failure-script-changed", before="echo '# campaign' >> /etc/swizzin/scripts/remove/autobrr.sh",
          expect="refused", text="script-changed"),
-    dict(key="panne-source-modifiee", before="echo '# campagne' >> /etc/swizzin/sources/functions/utils",
+    dict(key="failure-source-changed", before="echo '# campaign' >> /etc/swizzin/sources/functions/utils",
          expect="refused", text="script-changed"),
-    dict(key="panne-petit-disque", run=["--tmpfs", "/var/backups/swizzin-store:size=64m,mode=0700"],
+    dict(key="failure-small-disk", run=["--tmpfs", "/var/backups/swizzin-store:size=64m,mode=0700"],
          expect="refused", text="not enough free space"),
-    dict(key="panne-disque-plein", run=["--tmpfs", "/var/backups/swizzin-store:size=300m,mode=0700"],
-         helper_args=PAUSE(20), on_phase=[["copy", "sleep 2; dd if=/dev/zero of=/var/backups/swizzin-store/campagne-plein"
+    dict(key="failure-disk-full", run=["--tmpfs", "/var/backups/swizzin-store:size=300m,mode=0700"],
+         helper_args=PAUSE(20), on_phase=[["copy", "sleep 2; dd if=/dev/zero of=/var/backups/swizzin-store/campaign-full"
                                                    " bs=1M 2>/dev/null; true"]],
          expect="put-back", text="the copy of its settings failed"),
-    dict(key="panne-stop-copie", helper_args=PAUSE(15), stop_at="copy", expect="put-back", text="stopped at your request"),
-    dict(key="panne-redemarrage-copie", helper_args=PAUSE(30),
+    dict(key="failure-stop-copy", helper_args=PAUSE(15), stop_at="copy", expect="put-back", text="stopped at your request"),
+    dict(key="failure-restart-copy", helper_args=PAUSE(30),
          on_phase=[["copy", "sleep 3; systemctl restart swizzin-store"]], expect="put-back", text=""),
-    dict(key="panne-crash-copie", helper_args=PAUSE(30),
+    dict(key="failure-crash-copy", helper_args=PAUSE(30),
          on_phase=[["copy", "sleep 3; systemctl kill --kill-whom=main --signal=SIGKILL swizzin-store"]],
          expect="put-back", text="put back"),
     # the automatic updates start between the checks and Swizzin's script (a systemd reload can trigger them):
     # the removal waits for them, then goes on
-    dict(key="panne-apt-pendant-copie", helper_args=PAUSE(10),
+    dict(key="failure-apt-during-copy", helper_args=PAUSE(10),
          on_phase=[["copy", SLOW_APT_DAILY.replace("sleep 900", "sleep 25")]], expect="consistent"),
-    dict(key="panne-redemarrage-script", app="transmission",
+    dict(key="failure-restart-script", app="transmission",
          on_phase=[["remove", "sleep 2; systemctl restart swizzin-store"]], expect="consistent"),
-    dict(key="panne-nginx-casse", before="echo 'campagne_casse;' > /etc/nginx/apps/campagne-casse.conf",
+    dict(key="failure-nginx-broken", before="echo 'campaign_broken;' > /etc/nginx/apps/campaign-broken.conf",
          expect="nginx-broken"),
 ]
 
@@ -212,13 +212,13 @@ class Campaign:
         self.put(name, "/root/campaign/dropin.conf", "[Service]\nExecStart=\nExecStart=/usr/bin/python3 -I -B "
                  "/usr/local/lib/swizzin-store/swizzin_store.py %s\n" % args)
         self.sh(name, "mkdir -p /etc/systemd/system/swizzin-store.service.d && cp /root/campaign/dropin.conf"
-                " /etc/systemd/system/swizzin-store.service.d/campagne.conf && cd /root/fork &&"
+                " /etc/systemd/system/swizzin-store.service.d/campaign.conf && cd /root/fork &&"
                 " cp -a swizzin.py /opt/swizzin/ && cp -a core static templates store-helper /opt/swizzin/ &&"
                 " chown -R swizzin:swizzin /opt/swizzin && bash store-helper/install.sh && systemctl restart panel",
                 timeout=300, check=True)
         self.wait_helper(name)
         # Ubuntu's automatic updates start on their own in a fresh container and make a removal refuse, as they
-        # should (panne-apt-daily checks it on purpose): the other runs wait for them to end
+        # should (failure-apt-daily checks it on purpose): the other runs wait for them to end
         self.sh(name, "systemctl stop apt-daily.timer apt-daily-upgrade.timer; for i in $(seq 1 180); do"
                 " systemctl is-active -q apt-daily.service apt-daily-upgrade.service"
                 " || break; sleep 5; done", timeout=960)
@@ -325,15 +325,15 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
             for folder in ("torrents", "Downloads", "media"):
                 d = "/home/%s/%s" % (user, folder)
                 script.append("[ -d %s ] || { install -d -o %s -g %s %s && echo created %s; }" % (d, user, user, d, d))
-                f = d + "/campagne-temoin.bin"
+                f = d + "/campaign-witness.bin"
                 script.append("head -c 65536 /dev/urandom > %s && chown %s: %s" % (f, user, f))
                 files.append(f)
         for path, kinds in table_paths.get("kept", {}).items():
             if kinds == ["d"]:
-                f = path + "/campagne-garde.bin"
+                f = path + "/campaign-kept.bin"
                 script.append("head -c 4096 /dev/urandom > %s && chown --reference=%s %s" % (shlex.quote(f), shlex.quote(path), shlex.quote(f)))
                 files.append(f)
-        target = "/home/%s/media/campagne-film.mkv" % ctx["master"]
+        target = "/home/%s/media/campaign-film.mkv" % ctx["master"]
         script.append("head -c 131072 /dev/urandom > %s && chown %s: %s" % (target, ctx["master"], target))
         files.append(target)
         traps = None
@@ -341,13 +341,13 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
         if folders:
             d = folders[0]
             q = lambda s: shlex.quote(s)  # noqa: E731
-            traps = {"folder": d, "link_file": d + "/campagne-lien-fichier", "link_dir": d + "/campagne-lien-dossier",
-                     "fifo": d + "/campagne-fifo", "foreign": d + "/campagne-autre.bin", "target": target}
+            traps = {"folder": d, "link_file": d + "/campaign-link-file", "link_dir": d + "/campaign-link-dir",
+                     "fifo": d + "/campaign-fifo", "foreign": d + "/campaign-other.bin", "target": target}
             script += ["ln -s %s %s && chown -h --reference=%s %s" % (target, q(traps["link_file"]), q(d), q(traps["link_file"])),
                        "ln -s /home/%s/media %s && chown -h --reference=%s %s" % (ctx["master"], q(traps["link_dir"]), q(d),
                                                                                q(traps["link_dir"])),
                        "mkfifo %s && chown --reference=%s %s" % (q(traps["fifo"]), q(d), q(traps["fifo"])),
-                       "echo campagne > %s && chown 65534:65534 %s" % (q(traps["foreign"]), q(traps["foreign"]))]
+                       "echo campaign > %s && chown 65534:65534 %s" % (q(traps["foreign"]), q(traps["foreign"]))]
         created = [line.split(" ", 1)[1] for line in self.sh(name, "\n".join(script), check=True).splitlines()
                    if line.startswith("created ")]
         hashes = self.tool(name, "/root/campaign/snapshot.py", "hash", *files)
@@ -504,7 +504,7 @@ echo "$loc $code" """ % (app, shlex.quote(LOGIN))
                 except RuntimeError as e:
                     record["archive_report"] = {"error": str(e)}
             if spec.get("expect") == "nginx-broken":
-                record["after_fix"] = self.sh(name, "rm -f /etc/nginx/apps/campagne-casse.conf && nginx -t 2>&1 &&"
+                record["after_fix"] = self.sh(name, "rm -f /etc/nginx/apps/campaign-broken.conf && nginx -t 2>&1 &&"
                                               " systemctl reload nginx && sleep 2 && nginx -T 2>/dev/null | grep -ci"
                                               " 'location.*/%s' || true" % app).strip()
             removed = removal.get("result") == "removed"
@@ -638,7 +638,7 @@ def main():
     p = argparse.ArgumentParser(description="App Store uninstall campaign (throwaway Swizzin containers).")
     p.add_argument("groups", nargs="*", default=["cycles", "neighbours", "failures", "panel"])
     p.add_argument("--out", help="results folder")
-    p.add_argument("--only", nargs="+", help="only these runs (keys: the app's name for its cycle, voisin-..., panne-...)")
+    p.add_argument("--only", nargs="+", help="only these runs (keys: the app's name for its cycle, neighbour-..., failure-...)")
     p.add_argument("--base", action="store_true", help="build %s from swz-camp:base and stop" % BASE)
     p.add_argument("--docker", default="docker", help='the docker command, for example "sudo -n docker"')
     p.add_argument("--disk", default="/", help="the file system Docker writes to")

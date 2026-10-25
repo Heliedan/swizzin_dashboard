@@ -346,11 +346,11 @@ appstatus();
 })();
 
 (function diskusage() {
-  {# 2026-10-20 : dès que la carte Disk Info a reçu un relevé en direct (static/js/live_stats.js pose data-direct),
-     elle est mise à jour chaque seconde : ce relevé de chaque minute s'arrête. Avant, ou sans socket.io
-     (CDN bloqué...), il remplit la carte comme avant. #}
-  var carte = document.getElementById('carte-disque');
-  if (carte && carte.hasAttribute('data-direct')) { return; }
+  {# As soon as the Disk Info card has received a live reading (static/js/live_stats.js sets data-live),
+     it is updated every second: this poll of every minute stops. Before that, or without socket.io
+     (CDN blocked...), it fills the card as before. #}
+  var card = document.getElementById('disk-card');
+  if (card && card.hasAttribute('data-live')) { return; }
   $.ajax({
     url: "{{ url_for('disk_free') }}",
     statusCode: {
@@ -359,15 +359,15 @@ appstatus();
       }
     },
     success: function(data) {
-      if (carte && carte.hasAttribute('data-direct')) { return; }  {# le direct est arrivé pendant la requête #}
+      if (card && card.hasAttribute('data-live')) { return; }  {# the live data arrived during the request #}
       for (var mount in data) {
         var percent = Math.trunc(data[mount]['perutil']);
         $("#"+$.escapeSelector(mount)+"diskfree").html(data[mount]['diskfree']);
         $("#"+$.escapeSelector(mount)+"diskused").html(data[mount]['diskused']);
         $("#"+$.escapeSelector(mount)+"disktotal").html(data[mount]['disktotal']);
         $("#"+$.escapeSelector(mount)+"diskpercent").html(data[mount]['perutil']);
-        {# 2026-10-20 : couleur du niveau d'alerte calculé par le serveur avec DISK_WARN_PERCENT et DISK_CRIT_PERCENT
-           (swizzin.cfg), comme la carte en direct et le bandeau « disque bientôt plein », au lieu de 75 % / 90 %. #}
+        {# Colour of the alert level computed by the server with DISK_WARN_PERCENT and DISK_CRIT_PERCENT
+           (swizzin.cfg), as for the live card and the "disk almost full" banner, instead of 75 % / 90 %. #}
         var color = data[mount]['alert'] === 'critical' ? 'bg-danger' : (data[mount]['alert'] === 'warning' ? 'bg-warning' : 'bg-success');
         $("#"+$.escapeSelector(mount)+"indicator.systemindicator").removeClass("bg-secondary bg-success bg-warning bg-danger").addClass(color);
         $("#"+$.escapeSelector(mount)+"diskprogress").css("width", percent + "%").attr("aria-valuenow", percent).removeClass("bg-success bg-warning bg-danger").addClass(color);

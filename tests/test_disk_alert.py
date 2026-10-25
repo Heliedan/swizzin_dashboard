@@ -52,55 +52,55 @@ class Thresholds(unittest.TestCase):
     """DISK_WARN_PERCENT and DISK_CRIT_PERCENT, as read from swizzin.cfg."""
 
     def test_defaults(self):
-        self.assertEqual(live_stats.lire_seuils({}), DEFAULTS)
+        self.assertEqual(live_stats.read_thresholds({}), DEFAULTS)
 
     def test_settings_are_used(self):
         cfg = {"DISK_WARN_PERCENT": 80, "DISK_CRIT_PERCENT": 97.5}
-        self.assertEqual(live_stats.lire_seuils(cfg), (80, 97.5))
-        self.assertEqual(live_stats.lire_seuils({"DISK_WARN_PERCENT": "85"}), (85, 95))  # a number in quotes
+        self.assertEqual(live_stats.read_thresholds(cfg), (80, 97.5))
+        self.assertEqual(live_stats.read_thresholds({"DISK_WARN_PERCENT": "85"}), (85, 95))  # a number in quotes
 
     def test_invalid_values_fall_back_to_the_defaults(self):
         for bad in ("ninety", "", "90%", None, -1, -0.01, 100.01, 1000, float("nan"), float("inf"),
                     True, False, [90], {"x": 1}, 10 ** 400):
             with self.subTest(value=bad):
-                journal = mock.Mock()
+                logger = mock.Mock()
                 cfg = {"DISK_WARN_PERCENT": bad, "DISK_CRIT_PERCENT": bad}
-                self.assertEqual(live_stats.lire_seuils(cfg, journal), DEFAULTS)
-                self.assertEqual(journal.warning.call_count, 2)  # the admin can see why in the log
+                self.assertEqual(live_stats.read_thresholds(cfg, logger), DEFAULTS)
+                self.assertEqual(logger.warning.call_count, 2)  # the admin can see why in the log
 
     def test_one_invalid_value_keeps_the_other_setting(self):
         cfg = {"DISK_WARN_PERCENT": 85, "DISK_CRIT_PERCENT": "full"}
-        self.assertEqual(live_stats.lire_seuils(cfg), (85, 95))
+        self.assertEqual(live_stats.read_thresholds(cfg), (85, 95))
 
     def test_zero_is_valid_and_not_logged(self):
-        journal = mock.Mock()
+        logger = mock.Mock()
         cfg = {"DISK_WARN_PERCENT": 0, "DISK_CRIT_PERCENT": 0}
-        self.assertEqual(live_stats.lire_seuils(cfg, journal), (0, 0))
-        journal.warning.assert_not_called()
+        self.assertEqual(live_stats.read_thresholds(cfg, logger), (0, 0))
+        logger.warning.assert_not_called()
 
     def test_warning_not_below_critical_turns_orange_off(self):
         """Orange from 96 % and red from 95 %: orange could never show. It is turned off, and the log says why."""
         for warn, crit in ((96, 95), (95, 95), ("ninety", 85)):
             with self.subTest(warn=warn, crit=crit):
-                journal = mock.Mock()
+                logger = mock.Mock()
                 cfg = {"DISK_WARN_PERCENT": warn, "DISK_CRIT_PERCENT": crit}
-                self.assertEqual(live_stats.lire_seuils(cfg, journal), (0, crit))
-                self.assertIn("DISK_WARN_PERCENT", journal.warning.call_args.args[0])
-                self.assertIn("orange", journal.warning.call_args.args[0])
+                self.assertEqual(live_stats.read_thresholds(cfg, logger), (0, crit))
+                self.assertIn("DISK_WARN_PERCENT", logger.warning.call_args.args[0])
+                self.assertIn("orange", logger.warning.call_args.args[0])
 
     def test_a_level_turned_off_is_not_an_inversion(self):
         for cfg, expected in (({"DISK_WARN_PERCENT": 96, "DISK_CRIT_PERCENT": 0}, (96, 0)),
                               ({"DISK_WARN_PERCENT": 0, "DISK_CRIT_PERCENT": 50}, (0, 50)),
                               ({"DISK_WARN_PERCENT": 94.99, "DISK_CRIT_PERCENT": 95}, (94.99, 95))):
             with self.subTest(cfg=cfg):
-                journal = mock.Mock()
-                self.assertEqual(live_stats.lire_seuils(cfg, journal), expected)
-                journal.warning.assert_not_called()
+                logger = mock.Mock()
+                self.assertEqual(live_stats.read_thresholds(cfg, logger), expected)
+                logger.warning.assert_not_called()
 
     def test_the_panel_starts_with_invalid_settings(self):
         """swizzin.cfg of this test holds invalid values: the panel started, and uses the defaults."""
         self.assertEqual(swizzin.app.config["DISK_WARN_PERCENT"], "ninety")
-        self.assertEqual(live_stats.lire_seuils(swizzin.app.config), DEFAULTS)
+        self.assertEqual(live_stats.read_thresholds(swizzin.app.config), DEFAULTS)
 
 
 class Levels(unittest.TestCase):
@@ -110,16 +110,16 @@ class Levels(unittest.TestCase):
         for pct, level in ((0, None), (89.99, None), (90, "warning"), (90.01, "warning"), (94.99, "warning"),
                            (95, "critical"), (95.01, "critical"), (100, "critical")):
             with self.subTest(pct=pct):
-                self.assertEqual(live_stats.niveau_alerte(pct, DEFAULTS), level)
+                self.assertEqual(live_stats.alert_level(pct, DEFAULTS), level)
 
     def test_zero_turns_a_level_off(self):
-        self.assertEqual(live_stats.niveau_alerte(99, (0, 95)), "critical")
-        self.assertEqual(live_stats.niveau_alerte(94.99, (0, 95)), None)
-        self.assertEqual(live_stats.niveau_alerte(100, (90, 0)), "warning")
-        self.assertEqual(live_stats.niveau_alerte(100, (0, 0)), None)
+        self.assertEqual(live_stats.alert_level(99, (0, 95)), "critical")
+        self.assertEqual(live_stats.alert_level(94.99, (0, 95)), None)
+        self.assertEqual(live_stats.alert_level(100, (90, 0)), "warning")
+        self.assertEqual(live_stats.alert_level(100, (0, 0)), None)
 
     def test_critical_wins_when_both_are_reached(self):
-        self.assertEqual(live_stats.niveau_alerte(97, (96, 95)), "critical")
+        self.assertEqual(live_stats.alert_level(97, (96, 95)), "critical")
 
 
 class Percent(unittest.TestCase):
@@ -139,7 +139,7 @@ class Percent(unittest.TestCase):
     def test_a_disk_full_for_the_apps_is_100_and_critical(self):
         _, _, free, pct = self.usage(1000 * self.GiB, 950 * self.GiB, 0)
         self.assertEqual((pct, free), ("100.00", "0.00 B"))  # used / total said 95.00
-        self.assertEqual(live_stats.niveau_alerte(float(pct), DEFAULTS), "critical")
+        self.assertEqual(live_stats.alert_level(float(pct), DEFAULTS), "critical")
 
     def test_an_empty_filesystem_does_not_divide_by_zero(self):
         self.assertEqual(self.usage(0, 0, 0)[3], "0.00")
@@ -152,7 +152,7 @@ class Percent(unittest.TestCase):
 
 
 class LiveEvent(unittest.TestCase):
-    """The level travels with each disk in the « live » event the cards already receive."""
+    """The level travels with each disk in the "live" event the cards already receive."""
 
     def test_each_disk_carries_its_level(self):
         devs = {"/": "sda1", "/a": "sdb1", "/b": "sdc1", "/c": "sdd1", "/gone": "sde1"}
@@ -164,13 +164,13 @@ class LiveEvent(unittest.TestCase):
             return "100.00 GiB", "x GiB", "7.66 GiB", pcts[mnt]
         with mock.patch.object(live_stats.util, "disk_usage", side_effect=usage), \
                 mock.patch.object(live_stats.os.path, "ismount", return_value=True), swizzin.app.app_context():
-            disks = live_stats.mesure((CPU_A, {}), (CPU_B, {}), 1.0, "test", "", devs, DEFAULTS)["disks"]
+            disks = live_stats.measure((CPU_A, {}), (CPU_B, {}), 1.0, "test", "", devs, DEFAULTS)["disks"]
         self.assertEqual({m: disks[m]["alert"] for m in pcts},
                          {"/": None, "/a": "warning", "/b": "warning", "/c": "critical"})
         self.assertEqual(disks["/gone"], {"unavailable": True})  # no alert for a disk that cannot be read
 
     def run_thread(self, config, percents):
-        """Runs the live_stats background task for two readings; returns the « live » events it sent."""
+        """Runs the live_stats background task for two readings; returns the "live" events it sent."""
         class Stop(Exception):
             pass
 
@@ -190,11 +190,11 @@ class LiveEvent(unittest.TestCase):
         devs = {m: "sd" + chr(97 + i) for i, m in enumerate(percents)}
         with mock.patch.dict(swizzin.app.config, config), fake_disks(percents), \
                 mock.patch.object(live_stats.os.path, "ismount", return_value=True), \
-                mock.patch.object(live_stats, "_modele", return_value=("test", "")), \
-                mock.patch.object(live_stats, "peripheriques", return_value=devs), \
-                mock.patch.object(live_stats, "a_part", return_value=[]), \
+                mock.patch.object(live_stats, "_model", return_value=("test", "")), \
+                mock.patch.object(live_stats, "mount_devices", return_value=devs), \
+                mock.patch.object(live_stats, "mounts_read_apart", return_value=[]), \
                 mock.patch.object(live_stats, "_cpu", side_effect=[CPU_A, CPU_B]), \
-                mock.patch.object(live_stats, "_disques", return_value={}):
+                mock.patch.object(live_stats, "_disks", return_value={}):
             with self.assertRaises(Stop):
                 live_stats.live_stats(swizzin.app, sio)
         return sio.sent
@@ -236,8 +236,8 @@ class StatsRoute(unittest.TestCase):
         client = swizzin.app.test_client()
         with mock.patch.dict(swizzin.app.config, config), \
                 mock.patch.object(swizzin, "get_mounts", return_value=list(percents)), \
-                mock.patch.object(swizzin, "peripheriques", side_effect=lambda ms: dict.fromkeys(ms, "sda")), \
-                mock.patch.object(swizzin, "a_part", return_value=[]), \
+                mock.patch.object(swizzin, "mount_devices", side_effect=lambda ms: dict.fromkeys(ms, "sda")), \
+                mock.patch.object(swizzin, "mounts_read_apart", return_value=[]), \
                 mock.patch.object(swizzin, "disk_usage", side_effect=lambda m: ("1 GiB", "1 GiB", "1 GiB", percents[m])):
             r = client.get("/stats/disk", headers=auth("tester"))
         self.assertEqual(r.status_code, 200)
@@ -272,17 +272,17 @@ class Page(unittest.TestCase):
         """The summary is always there and empty (not hidden from screen readers): they read what appears in it.
         The visible lines change nearly every second during a download: they are not a live region."""
         page = self.get_dashboard("tester", ["/"])
-        self.assertIn('<div id="alerte-disque"></div>\n'
-                      '        <div id="alerte-disque-resume" class="sr-only" role="status" aria-live="polite"></div>',
+        self.assertIn('<div id="disk-alert"></div>\n'
+                      '        <div id="disk-alert-summary" class="sr-only" role="status" aria-live="polite"></div>',
                       page)
         self.assertEqual(page.count("aria-live"), 1)
-        self.assertIn('id="carte-disque"', page)
+        self.assertIn('id="disk-card"', page)
 
     def test_the_minute_poll_stops_only_once_the_live_card_has_data(self):
         """Without socket.io (CDN blocked), the poll must keep filling the card, as it did before."""
-        guard = "if (carte && carte.hasAttribute('data-direct')) { return; }"
+        guard = "if (card && card.hasAttribute('data-live')) { return; }"
         page = self.get_dashboard("tester", ["/"])
-        self.assertRegex(page, r"\(function diskusage\(\) \{\s*var carte = document\.getElementById\('carte-disque'\);\s*"
+        self.assertRegex(page, r"\(function diskusage\(\) \{\s*var card = document\.getElementById\('disk-card'\);\s*"
                          + re.escape(guard) + r"\s*\$\.ajax\(\{")
         self.assertRegex(page, r"success: function\(data\) \{\s*" + re.escape(guard))
 
@@ -291,9 +291,9 @@ class Page(unittest.TestCase):
                                    ("tester", True, True), ("friend", True, False)):
             with self.subTest(user=user, quota=quota):
                 page = self.get_dashboard(user, ["/"], quota)
-                self.assertEqual('id="carte-disque"' in page, shown)
-                self.assertEqual('id="alerte-disque"' in page, shown)
-                self.assertEqual('id="alerte-disque-resume"' in page, shown)
+                self.assertEqual('id="disk-card"' in page, shown)
+                self.assertEqual('id="disk-alert"' in page, shown)
+                self.assertEqual('id="disk-alert-summary"' in page, shown)
 
     def test_a_trapped_mount_path_is_escaped(self):
         page = self.get_dashboard("tester", ["/", TRAP])
@@ -310,12 +310,12 @@ class Script(unittest.TestCase):
     def setUpClass(cls):
         with open(os.path.join(ROOT, "static", "js", "live_stats.js"), encoding="utf-8") as f:
             cls.js = f.read()
-        found = re.search(r"\n  function alertes\(d\) \{\n(.*?)\n  \}\n", cls.js, re.S)
+        found = re.search(r"\n  function alerts\(d\) \{\n(.*?)\n  \}\n", cls.js, re.S)
         cls.banner = found.group(1) if found else ""
 
     def test_the_banner_function_is_there_and_used(self):
         self.assertIn("'Disk almost full: ' + m + ' is ' + pct + '% used (' + x.diskfree + ' free)'", self.banner)
-        self.assertIn("alertes(d.disks)", self.js)
+        self.assertIn("alerts(d.disks)", self.js)
 
     def test_no_html_is_ever_inserted(self):
         """The mount path (and the free space) go through textContent: a trapped path stays plain text."""
@@ -323,16 +323,16 @@ class Script(unittest.TestCase):
                      "createContextualFragment", "DOMParser"):
             with self.subTest(sink=sink):
                 self.assertNotIn(sink, self.js)
-        self.assertIn("encart.textContent = l.texte;", self.banner)
+        self.assertIn("item.textContent = l.text;", self.banner)
 
     def test_a_long_mount_path_wraps_inside_the_banner(self):
         """A long path with no space ran out of the banner on a phone, hiding which disk is full."""
-        self.assertIn("var classe = 'alert mt-3 mb-0 text-break ' +", self.banner)
+        self.assertIn("var cls = 'alert mt-3 mb-0 text-break ' +", self.banner)
 
     def test_only_disks_of_the_card_raise_the_banner(self):
         """No Disk Info card (rights): no banner; a disk missing from the card does not show either."""
-        self.assertIn("if (!bandeau || !carte) { return; }", self.banner)
-        self.assertIn("carte.contains(document.getElementById(m + 'diskused'))", self.banner)
+        self.assertIn("if (!banner || !card) { return; }", self.banner)
+        self.assertIn("card.contains(document.getElementById(m + 'diskused'))", self.banner)
 
 
 if __name__ == "__main__":
