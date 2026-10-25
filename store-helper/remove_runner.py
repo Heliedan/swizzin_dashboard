@@ -60,6 +60,16 @@ def in_this_system(pid, proc="/proc"):
         return True  # cannot tell: counted
 
 
+def exit_code(status):
+    """The exit code of a status from os.waitpid, or minus the signal that ended the process.
+
+    The same as os.waitstatus_to_exitcode, which Python 3.8 (Ubuntu 20.04, the system Python the service runs
+    on) does not have. A stopped process is not reported here: waitpid is never asked for those (no WUNTRACED)."""
+    if os.WIFSIGNALED(status):
+        return -os.WTERMSIG(status)
+    return os.WEXITSTATUS(status)
+
+
 def zombie(pid, proc="/proc"):
     """True for a process that has ended but that its parent has not collected yet (state Z): it holds no lock.
 
@@ -111,6 +121,16 @@ def say(text):
     try:
         print("[App Store] " + text, flush=True)
     except OSError:  # the terminal is gone (the service stopped): the removal goes on regardless
+        pass
+
+
+def say_at_once(text):
+    """say() for a signal handler: straight to the terminal, past Python's buffer. The handler runs between two
+    steps of the main code, which may be writing to that buffer at that moment: print would then raise "reentrant
+    call" there and stop the removal."""
+    try:
+        os.write(sys.stdout.fileno(), ("[App Store] " + text + "\n").encode())
+    except (OSError, ValueError):
         pass
 
 
@@ -269,10 +289,10 @@ class Removal:
 
     def on_sigint(self, *_):
         if self.script_started:
-            say("Stopping is not possible now: Swizzin's remove script is running.")
+            say_at_once("Stopping is not possible now: Swizzin's remove script is running.")
         else:
             self.stop_asked = True
-            say("Stop asked: everything will be put back as it was.")
+            say_at_once("Stop asked: everything will be put back as it was.")
 
     def stop_point(self):
         if self.stop_asked:
@@ -768,7 +788,7 @@ class Removal:
                             say("Answered '%s' for you (Swizzin's default; the copy keeps the settings)." % answer)
             done, code = os.waitpid(pid, os.WNOHANG)
             if done:
-                status = os.waitstatus_to_exitcode(code)
+                status = exit_code(code)
                 break
             now = time.monotonic()
             if now - started > self.opts.timeout or now - last_output > self.opts.quiet_timeout:

@@ -411,6 +411,24 @@ class Runner(unittest.TestCase):
         out = (out + p.communicate(timeout=60)[0]).decode()
         self.assertEqual(self.w.result()["result"], "removed", out)
 
+    def test_ctrl_c_while_the_script_writes_a_lot_is_ignored(self):
+        # The answer to Ctrl+C is written while Swizzin's script output is being copied: written the ordinary way,
+        # it could land in the middle of that copy, and Python then stopped the removal ("reentrant call").
+        script = ('echo "demo script running"\n'
+                  'while [ ! -e "$STORE_TEST_ROOT/go" ]; do seq 2000; done\n')
+        self.w.app("demo", script + DEMO, **self.w.apps["demo"])
+        p = self.w.start()
+        out = self.w.wait_output(p, "demo script running")
+        for _ in range(200):
+            p.send_signal(signal.SIGINT)
+            time.sleep(0.005)
+        open(self.w.path("/go"), "w").close()
+        out = (out + p.communicate(timeout=60)[0]).decode("utf-8", "replace")
+        tail = "\n".join(line for line in out.splitlines() if not line.strip().isdigit())  # without seq's numbers
+        self.assertIn("Stopping is not possible now", tail)
+        self.assertNotIn("Unexpected error", tail)
+        self.assertEqual(self.w.result()["result"], "removed", tail)
+
     def test_an_app_started_again_meanwhile_is_put_back(self):
         # someone starts it from the panel's switch, after it was stopped, just before Swizzin's script
         self.w.state["active_in_phase"] = {"demo.service": "remove"}
@@ -578,6 +596,27 @@ class Pieces(unittest.TestCase):
         with mock.patch.dict(os.environ, self.w.env()):
             self.assertEqual(self.r.apt_busy(), "apt-get is running")
 
+
+
+class ExitCode(unittest.TestCase):
+    """exit_code reads a status from os.waitpid the way os.waitstatus_to_exitcode does (Python 3.9+)."""
+
+    def status(self, *argv):
+        pid = os.spawnvp(os.P_NOWAIT, argv[0], list(argv))
+        return os.waitpid(pid, 0)[1]
+
+    def test_an_exit_code(self):
+        self.assertEqual(remove_runner.exit_code(self.status("sh", "-c", "exit 3")), 3)
+        self.assertEqual(remove_runner.exit_code(self.status("true")), 0)
+
+    def test_a_signal(self):
+        self.assertEqual(remove_runner.exit_code(self.status("sh", "-c", "kill -TERM $$")), -signal.SIGTERM)
+
+    @unittest.skipUnless(hasattr(os, "waitstatus_to_exitcode"), "Python 3.8: nothing to compare with")
+    def test_same_as_python(self):
+        for argv in (("true",), ("sh", "-c", "exit 255"), ("sh", "-c", "kill -KILL $$")):
+            status = self.status(*argv)
+            self.assertEqual(remove_runner.exit_code(status), os.waitstatus_to_exitcode(status))
 
 if __name__ == "__main__":
     unittest.main()

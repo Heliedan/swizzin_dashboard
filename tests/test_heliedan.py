@@ -134,7 +134,7 @@ class Server:
         official = os.path.join(base, "official")  # what Swizzin clones (origin of the panel)
         write(os.path.join(official, "swizzin.py"), "print('panel')\n")
         write(os.path.join(official, "core", "custom", "profiles.py"), "# custom tiles\n")
-        git(base, "init", "-q", "-b", "master", official)
+        git(base, "-c", "init.defaultBranch=master", "init", "-q", official)  # not -b: git 2.25 (Ubuntu 20.04)
         git(official, "add", "-A")
         git(official, "commit", "-q", "-m", "official")
         git(base, "clone", "-q", official, self.panel)
