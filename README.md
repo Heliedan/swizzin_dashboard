@@ -2,7 +2,7 @@
 
 > **This branch (`heliedan`) is my personal version of the [Swizzin dashboard](https://github.com/swizzin/swizzin_dashboard), the one that runs on my own server.**
 > It is **not official** and not endorsed by the Swizzin team. Feel free to look at it or try it, at your own risk, with no promise of support.
-> The official project has no licence file yet ([#88](https://github.com/swizzin/swizzin_dashboard/issues/88)): if its authors ask me to, I will take this edition down.
+> Like the official project, this edition is under the [GNU GPL v3](LICENSE) (the official project chose it on 2 November 2026, after [#88](https://github.com/swizzin/swizzin_dashboard/issues/88)). It is a modified version: my changes are listed below, and the git history has every one of them with its date.
 > The original README follows further down.
 
 ![Dashboard with the live CPU, RAM, network and disk cards](docs/screenshots/dashboard.png)
@@ -160,7 +160,7 @@ I am not a developer: these changes were written with the help of an AI assistan
 
 ### En français
 
-Version personnelle et non officielle du panel Swizzin, celle qui tourne sur mon serveur : trois correctifs proposés au projet officiel (#83, #86, #87), des cartes CPU, RAM et disque actualisées chaque seconde (idée #85), une alerte quand un disque est presque plein, une limite des essais de mot de passe et une banque d'applications (App Store) : installer une application Swizzin depuis le panel, dans un terminal en direct, et en désinstaller 24 (copie des réglages avant, mot de passe toujours demandé). Libre à chacun de la tester, à ses risques, sans garantie de suivi. Le projet officiel n'a pas encore de licence (#88) : si ses auteurs me le demandent, je retire cette édition.
+Version personnelle et non officielle du panel Swizzin, celle qui tourne sur mon serveur : trois correctifs proposés au projet officiel (#83, #86, #87), des cartes CPU, RAM et disque actualisées chaque seconde (idée #85), une alerte quand un disque est presque plein, une limite des essais de mot de passe et une banque d'applications (App Store) : installer une application Swizzin depuis le panel, dans un terminal en direct, et en désinstaller 24 (copie des réglages avant, mot de passe toujours demandé). Libre à chacun de la tester, à ses risques, sans garantie de suivi. Comme le projet officiel, cette édition est sous licence GNU GPL v3 (choisie par le projet le 2 novembre 2026, après #88) : c'est une version modifiée, dont les changements sont listés ici et datés dans l'historique git.
 
 ---
 
