@@ -4,7 +4,7 @@
 
 This is a personal, unofficial edition of the [Swizzin dashboard](https://github.com/swizzin/swizzin_dashboard).
 It is not endorsed by the Swizzin team, and there is no promise of support.
-The [README](README.md) explains what is different from the official dashboard, and the licence question.
+The [README](README.md) explains what is different from the official dashboard, and that it is under the GNU GPL v3, like the official project.
 
 ## Where to report what
 
