@@ -6,9 +6,10 @@
 #   sudo bash heliedan.sh revert                    put the panel back exactly as it was before the first install
 #   sudo bash heliedan.sh status                    show which version runs, and an App Store service left behind
 #   sudo bash heliedan.sh remove-store              remove the App Store service (before box remove panel, or after)
-# What it changes: the panel's code in /opt/swizzin, after a full backup in /var/backups/heliedan, and the App Store's
-# small root service (swizzin-store, see store-helper/). Nothing else: no nginx, sudo or Swizzin setting. Your custom
-# tiles (core/custom/profiles.py) and swizzin.cfg are kept. If anything goes wrong, the panel is put back as it was.
+# What it changes: the panel's code in /opt/swizzin, after a full backup in /var/backups/heliedan, the App Store's
+# small root service (swizzin-store, see store-helper/), and the panel's Python packages when requirements.txt asks for
+# newer ones (revert does not downgrade them). Nothing else: no nginx, sudo or Swizzin setting. Your custom tiles
+# (core/custom/profiles.py) and swizzin.cfg are kept. If anything goes wrong, the panel is put back as it was.
 set -euo pipefail
 
 REPO=https://github.com/Heliedan/swizzin_dashboard
@@ -33,6 +34,7 @@ MARKER=store-helper/swizzin_store.py
 say() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 git_panel() { sudo -H -u "$PANEL_USER" git -C "$PANEL" "$@"; }  # the panel's files belong to the swizzin user
+py_panel() { sudo -H -u "$PANEL_USER" "$PYTHON" -I "$@"; }       # and so does its venv
 need_root() { [[ $EUID -eq 0 ]] || die "run it as root: sudo bash $0 ${1:-}"; }
 not_box() {
     [[ ! -f $ALTDASH_LOCK ]] || die "the edition was installed with box install altdash: Swizzin manages it." \
@@ -137,6 +139,20 @@ restore_panel() {  # the panel exactly as in the backup (code, git state, swizzi
     systemctl restart panel
 }
 
+packages_ok() { py_panel "$PANEL/tests/test_requirements.py" >/dev/null 2>&1; }  # what requirements.txt asks for
+
+update_packages() {  # as box upgrade panel does for the official panel: pip runs only when requirements.txt asks for more
+    packages_ok && return 0
+    say "Updating the panel's Python packages to the versions requirements.txt asks for"
+    if py_panel -m pip install --quiet --no-cache-dir --disable-pip-version-check --upgrade pip wheel &&
+        py_panel -m pip install --quiet --no-cache-dir --disable-pip-version-check -r "$PANEL/requirements.txt" &&
+        packages_ok; then
+        return 0
+    fi
+    say "Warning: the panel's Python packages could not all be updated (see above). The panel keeps the ones it has," \
+        "which may have known security flaws: run this again later"
+}
+
 install_edition() {
     local ref=${1:-heliedan} changed tmp
     checks install
@@ -148,6 +164,7 @@ install_edition() {
     say "Fetching '$ref' from $REPO"
     git_panel fetch --quiet "$REPO" "$ref" || die "could not fetch '$ref' (nothing was changed)"
     git_panel checkout --quiet -B heliedan FETCH_HEAD || die "git could not switch the panel's files (see above): nothing was changed"
+    update_packages  # before the check below, which the new code passes only with the packages it needs
     if ! sudo -u "$PANEL_USER" bash -c "cd $PANEL && $PYTHON -c 'import core.util, core.custom.live_stats, core.custom.store'" >/dev/null 2>&1; then
         drop_helper  # an update: the service of the previous version would be left without its panel
         restore_panel
@@ -278,7 +295,7 @@ main() {
         revert) revert_edition ;;
         status) show_status ;;
         remove-store) remove_store ;;
-        *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+        *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
     esac
 }
 
