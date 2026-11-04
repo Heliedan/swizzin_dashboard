@@ -7,3 +7,9 @@ eventlet
 requests
 dnspython<2.3
 packaging
+# Security floors: heliedan.sh install brings the venv of an existing panel up to them.
+# The realtime server (/socket.io), reachable before logging in: denial of service flaws fixed in these versions.
+python-socketio>=5.16.2
+python-engineio>=4.13.2
+# Pulled in by flask-htpasswd, never imported by the panel. The fixed versions need Python 3.9 or newer.
+PyJWT>=2.15.0; python_version >= "3.9"

@@ -82,6 +82,7 @@ STORE_SOCKET=$TEST_SOCKET
 PANEL_USER=$TEST_USER
 need_root() { :; }                     # run as root or not: the paths are the tests' own
 git_panel() { git -C "$PANEL" "$@"; }  # no swizzin user here
+py_panel() { "$PYTHON" "$@"; }
 sleep() { :; }
 "${TEST_CALL:-main}" "${args[@]}"
 """
@@ -192,9 +193,9 @@ class Server:
                 "FAKE_STATE": self.base, "HELIEDAN": HELIEDAN, "TEST_PYTHON": sys.executable, "TEST_SOCKET": self.socket,
                 "TEST_USER": pwd.getpwuid(os.getuid()).pw_name}
 
-    def heliedan(self, *args, call="main"):
+    def heliedan(self, *args, call="main", **env):
         """heliedan.sh "$@" on this server (or one of its functions): (exit code, what it printed)."""
-        r = subprocess.run(["bash", "-c", PRELUDE, "heliedan.sh", *args], env=dict(self.env(), TEST_CALL=call),
+        r = subprocess.run(["bash", "-c", PRELUDE, "heliedan.sh", *args], env=dict(self.env(), TEST_CALL=call, **env),
                            capture_output=True, text=True, timeout=120)
         return r.returncode, r.stdout + r.stderr
 
@@ -507,6 +508,56 @@ class Install(HeliedanTest):
         self.assertEqual(sorted(b.split("-")[0] for b in backups), ["original", "original.info", "replaced", "replaced"])
         with open(self.server.path("/var/backups/heliedan/original.info")) as f:
             self.assertIn("branch=heliedan", f.read())  # this panel, as it is now
+
+
+# Fake panel Python for update_packages: tests/test_requirements.py passes once $FAKE_STATE/packages.ok exists, which
+# pip -r makes, unless $FAKE_STATE/pip.fails exists. Every call is noted in $FAKE_STATE/calls.log.
+FAKE_PYTHON = r"""#!/bin/bash
+echo "python $*" >> "$FAKE_STATE/calls.log"
+case $1 in
+    -m) [[ ! -e $FAKE_STATE/pip.fails ]] || exit 1
+        [[ " $* " != *" -r "* ]] || touch "$FAKE_STATE/packages.ok" ;;
+    *) [[ -e $FAKE_STATE/packages.ok ]] ;;
+esac
+"""
+
+
+class Packages(HeliedanTest):
+    """install brings the panel's Python packages up to its requirements.txt (security floors), as box upgrade panel
+    does for the official panel: pip runs only when a package is missing or too old."""
+
+    PIP = "python -m pip install --quiet --no-cache-dir --disable-pip-version-check "
+
+    def setUp(self):
+        super().setUp()
+        self.python = os.path.join(self.base, "fake-python")
+        write(self.python, FAKE_PYTHON)
+        os.chmod(self.python, 0o755)
+        self.check = "python %s/tests/test_requirements.py" % self.server.path("/opt/swizzin")
+
+    def update(self):
+        code, out = self.server.heliedan(call="update_packages", TEST_PYTHON=self.python)
+        return code, out, [c for c in self.server.calls() if c.startswith("python ")]
+
+    def test_nothing_runs_when_they_are_recent_enough(self):
+        open(os.path.join(self.base, "packages.ok"), "w").close()
+        self.assertEqual(self.update(), (0, "", [self.check]))
+
+    def test_pip_brings_them_up_to_requirements_txt(self):
+        code, out, calls = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Updating the panel's Python packages", out)
+        self.assertNotIn("Warning", out)
+        self.assertEqual(calls, [self.check, self.PIP + "--upgrade pip wheel",
+                                 self.PIP + "-r %s/requirements.txt" % self.server.path("/opt/swizzin"), self.check])
+
+    def test_a_pip_failure_is_a_warning_and_install_goes_on(self):
+        """The packages stay as they were and the panel runs with them: install then checks that the code loads."""
+        open(os.path.join(self.base, "pip.fails"), "w").close()
+        code, out, calls = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Warning: the panel's Python packages could not all be updated", out)
+        self.assertEqual(calls, [self.check, self.PIP + "--upgrade pip wheel"])
 
 
 def tree(root):

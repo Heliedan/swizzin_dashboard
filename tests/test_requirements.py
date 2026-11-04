@@ -19,6 +19,8 @@ class TestRequirements(unittest.TestCase):
             if not line:
                 continue
             requirement = Requirement(line)
+            if requirement.marker is not None and not requirement.marker.evaluate():
+                continue  # not for this Python, as pip skips it too (PyJWT's floor on Python 3.8)
             with self.subTest(requirement=line):
                 version = metadata.version(requirement.name)
                 self.assertTrue(requirement.specifier.contains(version, prereleases=True),
