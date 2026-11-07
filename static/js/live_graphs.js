@@ -8,7 +8,10 @@
    to the card (preserveAspectRatio="none"), so nothing here reads the size of the page. Each reading only rewrites
    the "d" of the existing paths, and the texts that changed.
    Time: each reading is placed at the time it arrived (Date.now(), which keeps counting while a tablet sleeps).
-   No reading for more than GAP seconds, or a lost connection, cuts the line: the gap shows, as long as it lasted. */
+   No reading for more than GAP seconds, or a lost connection, cuts the line: the gap shows, as long as it lasted.
+   Legend: a series that has a button (#id-key-toggle, Down and Up of the bandwidth) can be hidden; the scale then
+   follows the series still shown, and the last one shown cannot be hidden. The choice is remembered by the browser
+   (localStorage, see remember() and recall()). */
 (function () {
   'use strict';
 
@@ -24,7 +27,20 @@
     units: ['B/s', 'KiB/s', 'MiB/s', 'GiB/s', 'TiB/s', 'PiB/s'],
     percent: '%',
     none: '--',  // a value that could not be read
+    locked: 'At least one series stays shown',  // the title of the last series shown, whose button does nothing
   };
+
+  // The series hidden with the legend's buttons, remembered by this browser only: key "live-graphs.<graph>.hidden",
+  // the hidden keys comma separated ("tx"). Blocked or absent storage (private browsing...) only means that every
+  // series is shown when the page loads. To remember nothing, drop these two functions and their two calls.
+  function recall(id) {
+    try {
+      return String(window.localStorage.getItem('live-graphs.' + id + '.hidden') || '').split(',');
+    } catch (e) { return []; }
+  }
+  function remember(id, keys) {
+    try { window.localStorage.setItem('live-graphs.' + id + '.hidden', keys.join(',')); } catch (e) { /* forgotten */ }
+  }
 
   function round(v) { return Math.round(v * 10) / 10; }  // a tenth of a second, a thousandth of the height
 
@@ -63,11 +79,17 @@
   };
 
   // One graph: the element #id of the page, one series per key (its paths #id-key-area and #id-key-line, its current
-  // value #id-key-now if the legend has one), and the scale labels #id-top and #id-middle.
+  // value #id-key-now and its button #id-key-toggle if the legend has them), and the scale labels #id-top and
+  // #id-middle.
   function Graph(id, keys, scale) {
     function get(suffix) { return document.getElementById(id + '-' + suffix); }
+    this.id = id;
+    this.keys = keys;
     this.scale = scale;
-    this.series = keys.map(function (k) { return { area: get(k + '-area'), line: get(k + '-line'), now: get(k + '-now') }; });
+    this.series = keys.map(function (k) {
+      return { area: get(k + '-area'), line: get(k + '-line'), now: get(k + '-now'), toggle: get(k + '-toggle'),
+               hidden: false };
+    });
     this.top = get('top');
     this.middle = get('middle');
     this.readings = [];  // {t: ms, v: [a value or null per series], cut: true if the line does not join the previous}
@@ -96,11 +118,13 @@
     if (r.length && now < r[r.length - 1].t) { now = r[r.length - 1].t; }
     this.trim(now);
     if (document.hidden) { return; }  // nothing to paint in a hidden tab: drawn again when it is shown
-    var max = 0;
-    r.forEach(function (x) { x.v.forEach(function (v) { if (v !== null && v > max) { max = v; } }); });
-    var top = this.scale.top(max), self = this;
+    var max = 0, self = this;
+    r.forEach(function (x) {  // the scale follows the series shown only
+      x.v.forEach(function (v, i) { if (v !== null && v > max && !self.series[i].hidden) { max = v; } });
+    });
+    var top = this.scale.top(max);
     this.series.forEach(function (s, i) {
-      var p = paths(r, i, now, top);
+      var p = s.hidden ? { area: '', line: '' } : paths(r, i, now, top);
       setPath(s.area, p.area);
       setPath(s.line, p.line);
       var text = self.texts[i];
@@ -110,6 +134,39 @@
       setText(this.top, this.scale.label(top));
       setText(this.middle, this.scale.label(top / 2));
     }
+  };
+
+  // A click on a series' button: hides it, or shows it again; the scale follows at once. The last series shown stays.
+  Graph.prototype.toggle = function (i) {
+    var s = this.series[i];
+    if (!s.hidden && this.shown() === 1) { return; }
+    s.hidden = !s.hidden;
+    remember(this.id, this.keys.filter(function (k, j) { return this.series[j].hidden; }, this));
+    this.buttons();
+    this.draw(Date.now());
+  };
+
+  // The series hidden when the page loads, as remembered: unknown keys are ignored, and if every series would be
+  // hidden, none is.
+  Graph.prototype.restore = function (keys) {
+    var hide = this.series.map(function (s, i) { return !!s.toggle && keys.indexOf(this.keys[i]) >= 0; }, this);
+    if (hide.indexOf(false) >= 0) { this.series.forEach(function (s, i) { s.hidden = hide[i]; }); }
+    this.buttons();
+  };
+
+  Graph.prototype.shown = function () {
+    return this.series.filter(function (s) { return !s.hidden; }).length;
+  };
+
+  // aria-pressed: the series is shown. The last series shown is aria-disabled (its click does nothing), with a title.
+  Graph.prototype.buttons = function () {
+    var locked = this.shown() === 1;
+    this.series.forEach(function (s) {
+      if (!s.toggle) { return; }
+      setAttr(s.toggle, 'aria-pressed', s.hidden ? 'false' : 'true');
+      setAttr(s.toggle, 'aria-disabled', locked && !s.hidden ? 'true' : null);
+      setAttr(s.toggle, 'title', locked && !s.hidden ? TEXT.locked : null);
+    });
   };
 
   // The "d" of series i: a line, and the area under it, one piece per stretch of readings without a cut or a hole.
@@ -147,6 +204,14 @@
     if (el && el.textContent !== text) { el.textContent = text; }
   }
 
+  function setAttr(el, name, value) {  // null removes it
+    if (value === null) {
+      if (el.hasAttribute(name)) { el.removeAttribute(name); }
+    } else if (el.getAttribute(name) !== value) {
+      el.setAttribute(name, value);
+    }
+  }
+
   // An error in a graph must not stop the live cards: socket.io would not call the handlers after this one, nor
   // read the rest of a batch of events (long polling).
   function guarded(f) {
@@ -168,6 +233,10 @@
       socket.on('speed', guarded(function (d) {
         if (d) { net.push([bytes(d.rx), bytes(d.tx)], [d.rx, d.tx], Date.now()); }
       }));
+      net.restore(recall(net.id));
+      net.series.forEach(function (s, i) {
+        if (s.toggle) { s.toggle.addEventListener('click', guarded(function () { net.toggle(i); })); }
+      });
     }
     socket.on('disconnect', function () { graphs.forEach(function (g) { g.cutNext = true; }); });
     document.addEventListener('visibilitychange', guarded(function () {

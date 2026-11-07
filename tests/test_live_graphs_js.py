@@ -68,6 +68,11 @@ def area(snap, graph, key):
     return subpaths(snap["graphs"][graph]["d"][f"{graph}-{key}-area"])
 
 
+def text_of(node):
+    """The text of a node of the page's tree, as textContent gives it."""
+    return node["text"] if "text" in node else "".join(text_of(c) for c in node.get("children", []))
+
+
 def find(node, id_):
     """The element with this id in a tree of tests/test_disk_alert_js.py, or None."""
     if node.get("attrs", {}).get("id") == id_:
@@ -119,6 +124,18 @@ class Page(unittest.TestCase):
         self.assert_graph(root, "cpu-graph", ["used"])
         self.assertIsNone(find(root, "net-graph"))
         self.assertIsNone(find(root, "current_rx"))
+
+    def test_down_and_up_are_toggle_buttons(self):
+        """In the legend of the bandwidth graph: real buttons, pressed (the series is shown) when the page loads."""
+        root = self.tree("tester")
+        for key, label in (("rx", "Down"), ("tx", "Up")):
+            button = find(root, f"net-graph-{key}-toggle")
+            self.assertIsNotNone(button, f"#net-graph-{key}-toggle is missing")
+            self.assertEqual((button["tag"], button["attrs"].get("type"), button["attrs"].get("aria-pressed")),
+                             ("button", "button", "true"))
+            self.assertIsNotNone(find(button, f"net-graph-{key}-now"))  # the current value is part of the button
+            self.assertIn(label, text_of(button))
+        self.assertEqual(find(root, "cpu-graph-used-toggle"), None)  # one series: no button
 
     def test_the_graphs_script_loads_before_live_stats(self):
         """live_stats.js hands its websocket to the graphs: no other connection is opened."""
@@ -246,6 +263,91 @@ class Bandwidth(NodeTest):
     def test_without_socketio_the_graphs_stay_empty(self):
         snap = self.run_page([], socketio=False)[0]
         self.assertEqual(set(snap["graphs"]["net-graph"]["d"].values()), {None})
+
+
+STORE_KEY = "live-graphs.net-graph.hidden"  # the localStorage key of the bandwidth graph's hidden series
+LOCKED = "At least one series stays shown"  # the title of the last button pressed
+
+
+def buttons(snap):
+    """{key: (aria-pressed, aria-disabled, title)} of the legend's buttons."""
+    return {b_id.split("-")[2]: (b["pressed"], b["disabled"], b["title"])
+            for b_id, b in snap["graphs"]["net-graph"]["buttons"].items()}
+
+
+def scale(snap):
+    text = snap["graphs"]["net-graph"]["text"]
+    return text["net-graph-top"], text["net-graph-middle"]
+
+
+def click(key, second):
+    return {"click": f"net-graph-{key}-toggle", "at": T0 + round(second * 1000)}
+
+
+class Legend(NodeTest):
+    """Down and Up, in the legend of the bandwidth graph, are buttons that hide and show their series."""
+
+    def test_a_click_hides_the_series_and_another_shows_it_again(self):
+        snaps = self.run_page([readings(range(10)), click("tx", 9), click("tx", 9)], storage={})
+        drawn, hidden, shown = snaps[1:]
+        d = lambda snap, part: snap["graphs"]["net-graph"]["d"][f"net-graph-tx-{part}"]  # noqa: E731
+        self.assertTrue(d(drawn, "line") and d(drawn, "area"))
+        self.assertEqual((d(hidden, "line"), d(hidden, "area")), ("", ""))
+        self.assertEqual(line(hidden, "net-graph", "rx"), line(drawn, "net-graph", "rx"))  # same scale here: 1 MiB/s
+        self.assertEqual((d(shown, "line"), d(shown, "area")), (d(drawn, "line"), d(drawn, "area")))
+        self.assertEqual([buttons(snap)["tx"][0] for snap in (drawn, hidden, shown)], ["true", "false", "true"])
+        self.assertEqual([buttons(snap)["rx"][0] for snap in (drawn, hidden, shown)], ["true", "true", "true"])
+
+    def test_the_scale_follows_the_series_shown(self):
+        """Up at 900 KiB/s hidden: Down at 50 KiB/s fills the graph, at once, with no new reading."""
+        snaps = self.run_page([readings(range(5), rx="50.00 KiB/s", tx="900.00 KiB/s"),
+                               click("tx", 4), click("tx", 4), click("rx", 4)], storage={})
+        both, up_hidden, both_again, down_hidden = snaps[1:]
+        self.assertEqual(scale(both), ("1000 KiB/s", "500 KiB/s"))
+        self.assertEqual(scale(up_hidden), ("50 KiB/s", "25 KiB/s"))
+        self.assertEqual({y for x, y in line(up_hidden, "net-graph", "rx")[0]}, {0.0})  # at the top
+        self.assertEqual(scale(both_again), ("1000 KiB/s", "500 KiB/s"))
+        self.assertEqual(scale(down_hidden), ("1000 KiB/s", "500 KiB/s"))  # 900 KiB/s: the same step
+        self.assertEqual({y for x, y in line(down_hidden, "net-graph", "tx")[0]}, {10.0})
+
+    def test_the_last_series_shown_cannot_be_hidden(self):
+        snaps = self.run_page([readings(range(5)), click("tx", 4), click("rx", 4), click("tx", 4)], storage={})
+        loaded, drawn, up_hidden, refused, both = snaps
+        for snap in (loaded, drawn, both):
+            self.assertEqual(buttons(snap), {"rx": ("true", None, None), "tx": ("true", None, None)})
+        self.assertEqual(buttons(up_hidden), {"rx": ("true", "true", LOCKED), "tx": ("false", None, None)})
+        self.assertEqual(buttons(refused), buttons(up_hidden))  # the click on Down changed nothing
+        self.assertEqual(refused["graphs"]["net-graph"]["changes"], 0)
+        self.assertEqual(refused["storage"], {STORE_KEY: "tx"})
+
+    def test_a_hidden_series_keeps_its_current_value(self):
+        snap = self.run_page([readings(range(5), tx="1.00 KiB/s"), click("tx", 4),
+                              readings([5], tx="2.00 KiB/s")], storage={})[3]
+        self.assertEqual(snap["graphs"]["net-graph"]["text"]["net-graph-tx-now"], "2.00 KiB/s")
+        self.assertEqual(snap["graphs"]["net-graph"]["d"]["net-graph-tx-line"], "")
+
+    def test_the_choice_is_remembered_in_the_browser(self):
+        snaps = self.run_page([click("tx", 0), click("tx", 0), click("rx", 0)], storage={})
+        self.assertEqual([snap["storage"] for snap in snaps],
+                         [{}, {STORE_KEY: "tx"}, {STORE_KEY: ""}, {STORE_KEY: "rx"}])
+        for key, other in (("tx", "rx"), ("rx", "tx")):
+            with self.subTest(hidden=key):
+                loaded, drawn = self.run_page([readings(range(3), rx="50.00 KiB/s", tx="900.00 KiB/s")],
+                                              storage={STORE_KEY: key})
+                self.assertEqual(buttons(loaded)[key][0], "false")
+                self.assertEqual(buttons(loaded)[other][:2], ("true", "true"))  # the last one shown
+                self.assertFalse(drawn["graphs"]["net-graph"]["d"][f"net-graph-{key}-line"])  # never drawn
+                self.assertTrue(drawn["graphs"]["net-graph"]["d"][f"net-graph-{other}-line"])
+                self.assertEqual(scale(drawn), ("50 KiB/s", "25 KiB/s") if key == "tx" else ("1000 KiB/s", "500 KiB/s"))
+
+    def test_without_a_usable_storage_both_series_are_shown(self):
+        """No localStorage, a blocked or full one, or a value that cannot be used: both shown, and the buttons work."""
+        for storage in (None, "throws", "full", {STORE_KEY: "rx,tx"}, {STORE_KEY: "nonsense"}, {STORE_KEY: ""}):
+            with self.subTest(storage=storage):
+                loaded, drawn, clicked = self.run_page([readings(range(3)), click("tx", 2)], storage=storage)
+                self.assertEqual(buttons(loaded), {"rx": ("true", None, None), "tx": ("true", None, None)})
+                self.assertTrue(drawn["graphs"]["net-graph"]["d"]["net-graph-tx-line"])
+                self.assertEqual(buttons(clicked)["tx"][0], "false")
 
 
 class Cpu(NodeTest):
