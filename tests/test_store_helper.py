@@ -70,9 +70,16 @@ class Helper:
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
             preexec_fn=lambda: self._limits(ignore_sigint, max_file_size))
         for _ in range(100):
-            if os.path.exists(self.path) or self.proc.poll() is not None:
+            if self.listening() or self.proc.poll() is not None:
                 break
             time.sleep(0.05)
+
+    def listening(self):
+        """The socket file appears at bind(), a moment before the helper listens: a connection in between is refused.
+        Linux lists a listening socket in /proc/net/unix with the flag __SO_ACCEPTCON (00010000)."""
+        with open("/proc/net/unix") as f:
+            return any(len(fields) == 8 and fields[3] == "00010000" and fields[7] == self.path
+                       for fields in map(str.split, f))
 
     @staticmethod
     def _limits(ignore_sigint, max_file_size):
