@@ -8,16 +8,22 @@
   <link href="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.6.1/css/bootstrap4-toggle.min.css" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/swizzin.css')}}">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/live_stats.css')}}">
+  {%- if layout == 'overview' %}
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/overview.css')}}">
+  {%- endif %}
 </head>
 <body>
 <div class="d-flex" id="wrapper">
   {{macros.build_sidebar(pages=pages, vendor=vendor)}}
   {% if config.SHAREDSERVER == True %}
-    {{macros.build_nav_shared(user=user, apps=pages, vendor=vendor)}}
+    {{macros.build_nav_shared(user=user, apps=pages, vendor=vendor, layout=layout)}}
   {% else %}
-    {{macros.build_nav(user=user, apps=pages)}}
+    {{macros.build_nav(user=user, apps=pages, layout=layout)}}
   {% endif %}
   <!-- #page-content-wrapper -->
+  {%- if layout == 'overview' %}{# the Overview layout, chosen in the account menu (see the README) #}
+  {% include 'overview.html' %}
+  {%- else %}
   <div class="container-fluid">
       {# "Disk almost full" banner, filled by static/js/live_stats.js. Same condition as the
          Disk Info card: whoever does not see the card does not see the banner. See the README.
@@ -47,6 +53,7 @@
           {% endif %}
       </div>
     </div>
+  {%- endif %}
   <!-- /#page-content-wrapper -->
 </div>
 <!-- /#body-content-wrapper -->
@@ -58,6 +65,9 @@
 <script src="{{ url_for('static', filename='js/swizzin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/live_graphs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/live_stats.js') }}"></script>
+{%- if layout == 'overview' %}
+<script src="{{ url_for('static', filename='js/overview.js') }}"></script>
+{%- endif %}
 
 
 <script>

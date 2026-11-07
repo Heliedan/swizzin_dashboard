@@ -17,6 +17,7 @@ class Config:
     FORMS_LOGIN = True
     NETWORK_TOTALS = False
     DISK_UNITS = "iec"
+    DASHBOARD_LAYOUT = "classic"  # or "overview": the layout of the accounts that chose none (core/layouts.py)
 
     NETWORK_INFO_CUTOFF = "YYYY-MM-DD"
     NETWORK_INFO_TOP = True

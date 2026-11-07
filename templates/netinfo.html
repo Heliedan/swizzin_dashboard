@@ -1,19 +1,12 @@
-{% from 'live_graph.html' import live_graph %}
+{% from 'live_graph.html' import bandwidth_graph %}
 <div class="card border-dark mt-3">
     <div class="card-header">Network Info</div>
     <div class="card-body">
-      {# Live graph of the download and upload speed of the default interface, over the last 5 minutes, drawn by
-         static/js/live_graphs.js from the "speed" event. For the admin only, like the speed table below.
-         Down and Up are buttons: pressed, their series is shown; a click hides it (see the README). #}
-      {% if config.ADMIN_USER == user %}
-        <div class="small d-flex flex-wrap align-items-center mb-1">
-          <button type="button" class="btn btn-sm live-graph-toggle mr-2" id="net-graph-rx-toggle" aria-pressed="true"><span class="live-graph-key live-graph-rx"></span><span class="live-graph-label">Down</span> <span id="net-graph-rx-now">--</span></button>
-          <button type="button" class="btn btn-sm live-graph-toggle mr-2" id="net-graph-tx-toggle" aria-pressed="true"><span class="live-graph-key live-graph-tx"></span><span class="live-graph-label">Up</span> <span id="net-graph-tx-now">--</span></button>
-          <span class="ml-auto text-muted">Last 5 minutes</span>
-        </div>
-        <div class="mb-3">
-          {{ live_graph('net-graph', ['rx', 'tx'], 'Download and upload speed over the last 5 minutes') }}
-        </div>
+      {# Live graph of the download and upload speed of the default interface, over the last 5 minutes, with its legend
+         (templates/live_graph.html). For the admin only, like the speed table below. The Overview layout shows it at
+         the top of its page (templates/overview.html), not here. #}
+      {% if config.ADMIN_USER == user and layout != 'overview' %}
+        {{ bandwidth_graph() }}
       {% endif %}
       {% if config.SHAREDSERVER == True %}
         <div class="row">

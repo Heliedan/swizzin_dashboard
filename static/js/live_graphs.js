@@ -1,5 +1,6 @@
 /* Live graphs of the dashboard: the download and upload speed of the default interface (Network Info card) and
-   the CPU used (CPU Info card), over the last 5 minutes. They are drawn from the websocket events the page already
+   the CPU used (CPU Info card), over the last 5 minutes; in the Overview layout, the small graphs of its tiles too
+   (CPU, memory, disk / and network, see GRAPHS). They are drawn from the websocket events the page already
    receives, one per second: "speed" (swizzin.py) and "live" (core/custom/live_stats.py). Nothing is stored: the
    graphs start empty when the page loads. static/js/live_stats.js hands its websocket over with
    LiveGraphs.attach(socket): no other connection is opened. See the README.
@@ -73,7 +74,7 @@
     },
   };
 
-  var CPU_SCALE = {  // always 0 to 100 %
+  var PERCENT_SCALE = {  // always 0 to 100 %
     top: function () { return 100; },
     label: function (v) { return v + TEXT.percent; },
   };
@@ -220,27 +221,54 @@
     };
   }
 
+  // The graphs a page can have, and what a reading of their event gives them: their values, and the texts of their
+  // legend (null: nothing for that graph in this reading). The cards' graphs, then the small ones of the tiles of the
+  // Overview layout (templates/overview.html), on the same readings. A graph that is not on the page is left out.
+  function cpuUsed(d) { return d.cpu ? [[percent(d.cpu.used)], []] : null; }
+  function speeds(d) { return [[bytes(d.rx), bytes(d.tx)], [d.rx, d.tx]]; }
+  var GRAPHS = [
+    { id: 'cpu-graph', event: 'live', keys: ['used'], scale: PERCENT_SCALE, read: cpuUsed },
+    { id: 'net-graph', event: 'speed', keys: ['rx', 'tx'], scale: BANDWIDTH_SCALE, read: speeds },  // the admin only
+    { id: 'cpu-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE, read: cpuUsed },
+    { id: 'ram-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE,
+      read: function (d) { return d.ram ? [[percent(d.ram.perutil)], []] : null; } },
+    { id: 'disk-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE,
+      read: function (d) {  // the root disk; unreadable or missing: a hole
+        if (!d.disks) { return null; }
+        var root = d.disks['/'];
+        return [[root && !root.unavailable ? percent(root.perutil) : null], []];
+      } },
+    { id: 'net-spark', event: 'speed', keys: ['rx', 'tx'], scale: BANDWIDTH_SCALE, read: speeds },
+  ];
+
   function attach(socket) {
-    var cpu = document.getElementById('cpu-graph') ? new Graph('cpu-graph', ['used'], CPU_SCALE) : null;
-    var net = document.getElementById('net-graph') ? new Graph('net-graph', ['rx', 'tx'], BANDWIDTH_SCALE) : null;
-    var graphs = [cpu, net].filter(Boolean);
-    if (cpu) {
-      socket.on('live', guarded(function (d) {
-        if (d && d.cpu) { cpu.push([percent(d.cpu.used)], [], Date.now()); }
-      }));
-    }
-    if (net) {  // the admin only, like the speed table of the card
-      socket.on('speed', guarded(function (d) {
-        if (d) { net.push([bytes(d.rx), bytes(d.tx)], [d.rx, d.tx], Date.now()); }
-      }));
-      net.restore(recall(net.id));
-      net.series.forEach(function (s, i) {
-        if (s.toggle) { s.toggle.addEventListener('click', guarded(function () { net.toggle(i); })); }
+    var graphs = [];
+    GRAPHS.forEach(function (g) {
+      if (document.getElementById(g.id)) { graphs.push({ graph: new Graph(g.id, g.keys, g.scale), from: g }); }
+    });
+    ['live', 'speed'].forEach(function (event) {
+      var fed = graphs.filter(function (x) { return x.from.event === event; });
+      if (!fed.length) { return; }
+      socket.on(event, function (d) {
+        if (!d) { return; }
+        var now = Date.now();
+        fed.forEach(guarded(function (x) {  // one graph's error stops neither the others nor the cards
+          var r = x.from.read(d);
+          if (r) { x.graph.push(r[0], r[1], now); }
+        }));
       });
-    }
-    socket.on('disconnect', function () { graphs.forEach(function (g) { g.cutNext = true; }); });
+    });
+    graphs.forEach(function (x) {  // the series that a legend button hides: Down and Up of the bandwidth graph
+      var g = x.graph;
+      if (!g.series.some(function (s) { return s.toggle; })) { return; }
+      g.restore(recall(g.id));
+      g.series.forEach(function (s, i) {
+        if (s.toggle) { s.toggle.addEventListener('click', guarded(function () { g.toggle(i); })); }
+      });
+    });
+    socket.on('disconnect', function () { graphs.forEach(function (x) { x.graph.cutNext = true; }); });
     document.addEventListener('visibilitychange', guarded(function () {
-      if (!document.hidden) { graphs.forEach(function (g) { g.draw(Date.now()); }); }
+      if (!document.hidden) { graphs.forEach(function (x) { x.graph.draw(Date.now()); }); }
     }));
   }
 

@@ -1,0 +1,94 @@
+/* The Overview layout of the dashboard (templates/overview.html, see the README), on the Darkly theme of the panel.
+   Colours: OK and Up #00bc8c, Watch #f39c12, Critical #ff6b5b, Live and Down #5dade2, quiet text #b0b0b0. Only this
+   layout loads this file: the Classic page keeps its look. */
+.overview { padding-top: 1rem; padding-bottom: 2rem; }
+.overview .ov-block + .ov-row, .overview .ov-row + .ov-block { margin-top: 1.25rem; }
+/* The "disk almost full" banner (static/js/live_stats.js) at the top, with some room under it. */
+.overview #disk-alert > .alert:first-child { margin-top: 0 !important; }
+.overview #disk-alert > .alert:last-child { margin-bottom: 1rem !important; }
+.ov-heading { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.75rem; margin-bottom: 0.75rem; }
+.ov-title { margin: 0; font-size: 1.25rem; }
+.ov-hint { font-size: 0.8125rem; color: #b0b0b0; }
+
+/* Panels: the cards of this page, Service Info and the sections of the Details included. */
+.overview .card { border: 1px solid #444 !important; border-radius: 8px; overflow: hidden; }
+.overview .card-header { background-color: #3a3a3a; font-size: 1.0625rem; }
+.ov-card-title { margin: 0; font-size: inherit; }
+
+/* At a glance: four tiles, two per row on a tablet or a phone. Each tile takes the colour of its level (data-level,
+   set by static/js/live_stats.js); the badge says it in words. */
+.ov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+.ov-tile { min-width: 0; background-color: #303030; border: 1px solid #444; border-radius: 8px; padding: 14px 16px 10px;
+  display: flex; flex-direction: column; gap: 4px; --level: #b0b0b0; }
+.ov-tile[data-level="ok"] { --level: #00bc8c; }
+.ov-tile[data-level="warning"] { --level: #f39c12; }
+.ov-tile[data-level="critical"] { --level: #ff6b5b; }
+.ov-tile[data-level="live"] { --level: #5dade2; }
+.ov-tile-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ov-tile-label { margin: 0; font-size: 0.8125rem; font-weight: 400; color: #b0b0b0; text-transform: uppercase;
+  letter-spacing: 1px; }
+.ov-badge { font-size: 0.75rem; font-weight: 700; line-height: 1.4; color: #1e1e1e; background-color: var(--level);
+  border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.ov-tile-value { font-size: 1.875rem; font-weight: 700; line-height: 1.2; color: var(--level);
+  overflow-wrap: anywhere; }
+.ov-tile-info { font-size: 0.8125rem; color: #b0b0b0; overflow-wrap: anywhere; }
+.ov-tile .live-graph-plot { height: 40px; margin-top: auto; background-color: transparent; border-radius: 0; }
+.ov-tile .live-graph-grid, .ov-tile .live-graph-scale { display: none; }
+.ov-tile path.live-graph-area.live-graph-used { fill: var(--level); }
+.ov-tile path.live-graph-line.live-graph-used { stroke: var(--level); }
+/* The network tile: Down then Up, each on its line, as received ("1.18 MiB/s"). */
+.ov-net-value { font-size: 1.25rem; line-height: 1.35; }
+.ov-net-value > span { display: block; white-space: nowrap; }
+.overview .ov-down { color: #5dade2; }
+.overview .ov-up { color: #00bc8c; }
+
+/* Down in the colour of the tiles, in the graphs and their legend; a hidden series keeps the look of
+   static/css/live_stats.css. */
+.overview path.live-graph-area.live-graph-rx { fill: #5dade2; }
+.overview path.live-graph-line.live-graph-rx { stroke: #5dade2; }
+.overview .live-graph-key.live-graph-rx { background-color: #5dade2; }
+.overview .live-graph-toggle[aria-pressed="false"] .live-graph-key { background-color: transparent; }
+
+/* The bandwidth graph next to the services; one under the other when the page is too narrow for both. */
+.ov-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.ov-row > .card { margin-top: 0 !important; min-width: 0; }
+.ov-row > .ov-network { flex: 2 1 560px; }
+.ov-row > .card:last-child { flex: 1 1 300px; }
+.ov-network .live-graph-plot { height: 220px; }
+.ov-periods { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ov-period { background-color: #2a2a2a; border-radius: 6px; padding: 8px 12px; display: flex; flex-direction: column; }
+.ov-period-label { font-size: 0.75rem; color: #b0b0b0; }
+.ov-period-value { display: flex; flex-wrap: wrap; column-gap: 0.75rem; font-size: 0.875rem; }
+.ov-period-value > span { white-space: nowrap; }
+.ov-periods-note { margin: 0.5rem 0 0; font-size: 0.8125rem; color: #b0b0b0; }
+
+/* Details: the Classic cards, each in a section closed by default. The summary is the section's header (the arrow
+   turns when it is open); the card inside loses its own header and frame. */
+/* Two columns from 1200 px wide (each about 450 px or more next to the sidebar, enough for the tables of Network
+   Info); each column stacks its sections on its own, so that opening one moves nothing in the other column. */
+@media (min-width: 1200px) {
+  .ov-block > .live-stack { display: flex; align-items: flex-start; gap: 16px; }
+  .ov-block > .live-stack > .ov-column { flex: 1 1 0; min-width: 0; }
+}
+.ov-section { margin-bottom: 8px; }
+.ov-section > summary { display: flex; justify-content: space-between; align-items: center; min-height: 48px;
+  cursor: pointer; list-style: none; border-bottom: 0; }
+.ov-section > summary::-webkit-details-marker { display: none; }
+.ov-section > summary::after { content: ""; width: 0.55em; height: 0.55em; margin: 0 0.25em 0.2em 1em; flex: none;
+  border-right: 2px solid #b0b0b0; border-bottom: 2px solid #b0b0b0; transform: rotate(45deg); }
+.ov-section[open] > summary::after { margin-bottom: -0.2em; transform: rotate(-135deg); }
+.ov-section > summary:focus { outline: none; }
+.ov-section > summary:focus-visible { outline: 2px solid #5dade2; outline-offset: -2px; }
+.ov-section[open] > summary { border-bottom: 1px solid #444; }
+.ov-section > .card { border: 0 !important; border-radius: 0; margin: 0 !important; overflow: visible; }
+.ov-section > .card > .card-header { display: none !important; }  /* !important: some have Bootstrap's d-flex */
+
+@media (max-width: 575.98px) {
+  .overview { padding-left: 12px; padding-right: 12px; }
+  .ov-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ov-tile { padding: 10px 12px 8px; }
+  .ov-tile-value { font-size: 1.5rem; }
+  .ov-net-value { font-size: 1rem; }
+  .ov-network .live-graph-plot { height: 160px; }
+  .ov-periods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

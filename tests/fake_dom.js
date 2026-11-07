@@ -1,12 +1,14 @@
 'use strict';
-/* A small fake DOM to run the dashboard's live scripts (static/js/live_graphs.js, static/js/live_stats.js) and its
-   polls in Node.js, with no npm package. Driven by tests/test_disk_alert_js.py, tests/test_bandwidth_js.py and
-   tests/test_live_graphs_js.py, which send on stdin, as JSON:
+/* A small fake DOM to run the dashboard's live scripts (static/js/live_graphs.js, static/js/live_stats.js), the
+   Overview layout's (static/js/overview.js), the layout menu of static/js/swizzin.js, and the dashboard's polls in
+   Node.js, with no npm package. Driven by tests/test_disk_alert_js.py, tests/test_bandwidth_js.py,
+   tests/test_live_graphs_js.py and tests/test_overview_js.py, which send on stdin, as JSON:
      page       the HTML the panel rendered, as a tree: {tag, attrs, children} or {text}
      scripts    the paths of the scripts to run, in the order of the page
      poll       the source of a poll found in the page (diskusage(), vnstat_top10()), or null
      socketio   false: socket.io did not load (no "io")
      watch      ids of elements whose text the snapshots give (optional)
+     attrs      [id, attribute] pairs whose value the snapshots give (optional)
      storage    the browser's localStorage: absent (none), {key: value} (works, starts with these), "throws" (blocked:
                 any use throws), "full" (reads find nothing, writes throw)
      steps      a list of steps, each one of:
@@ -19,17 +21,24 @@
                 {scroll: [id, top]}     the user scrolling an element
                 {hidden: true|false}    the browser tab hidden or shown again ("visibilitychange")
                 {click: id}             a click on that element (a disabled button gets none, as in a browser)
+                {clickOn: selector}     a click on the first element that matches a simple selector
+                {summary: name}         a click on the <summary> of <details data-section="name">: it opens or closes
                 {batch: [steps]}        several steps, with one snapshot after the last one
                 a step can also carry {at: ms}: the clock (Date.now()) when it happens
    and prints a list of snapshots of the page: after loading, then after each step.
    Inserting HTML (innerHTML...) throws: system data must only ever go in as text. The one exception is the HTML
    that the panel renders for #top10 (templates/top.html, escaped by Jinja), which the vnstat_top10() poll inserts
    with jQuery's .html(): the test gives it already parsed, as {tree}. A script that writes to console.error fails
-   the run: the live graphs report their own errors there instead of throwing. */
+   the run: the live graphs report their own errors there instead of throwing.
+   As in a browser, a <details> element fires "toggle" when it opens or closes, and a MutationObserver is told about
+   the children added to or removed from what it observes, both once the script that changed them has run: here, at
+   the end of the loading and of each step. */
 const fs = require('fs');
 const vm = require('vm');
 
 let changes = [];  // every change made to the page during the current step: the node changed
+let mutated = new Set();  // the elements whose children changed, for the MutationObservers
+let toggled = [];  // the <details> opened or closed, whose "toggle" event is due
 let added = [];  // every node added during the current step, as it was when added: {parent, cls, text}
 
 class Text {
@@ -69,6 +78,12 @@ class Element {
   set title(v) { this.setAttribute('title', v); }
   get hidden() { return this.hasAttribute('hidden'); }
   set hidden(v) { if (v) { this.setAttribute('hidden', ''); } else { this.removeAttribute('hidden'); } }
+  get open() { return this.hasAttribute('open'); }
+  set open(v) {  // <details>: "toggle" follows, once the script has run
+    if (!!v === this.open) { return; }
+    if (v) { this.setAttribute('open', ''); } else { this.removeAttribute('open'); }
+    toggled.push(this);
+  }
   get children() { return this.childNodes.filter(n => n.nodeType === 1); }
   get firstChild() { return this.childNodes[0] || null; }
   get firstElementChild() { return this.children[0] || null; }
@@ -85,6 +100,7 @@ class Element {
       this.childNodes.push(text);
     }
     changes.push(this);
+    mutated.add(this);
   }
   get innerHTML() { throw new Error('innerHTML is not available in these tests'); }
   set innerHTML(v) { throw new Error('HTML inserted with innerHTML: ' + v); }
@@ -98,6 +114,7 @@ class Element {
     this.childNodes.splice(i, 1);
     node.parentNode = null;
     changes.push(this);
+    mutated.add(this);
     return node;
   }
   contains(node) {
@@ -115,6 +132,7 @@ function adopt(parent, node, index) {
   node.parentNode = parent;
   parent.childNodes.splice(index, 0, node);
   changes.push(parent);
+  mutated.add(parent);
   return node;
 }
 
@@ -136,6 +154,12 @@ function matcher(selector) {  // only the selectors the scripts use: an unknown 
     return e => names.every(n => e.classList.contains(n));
   }
   if ((m = /^\[([\w-]+)\$="([^"]*)"\]$/.exec(selector))) { return e => (e.getAttribute(m[1]) || '').endsWith(m[2]); }
+  // tag, [attribute], [attribute=value] or [attribute="value"], and a tag with one of them: button[data-layout]
+  if ((m = /^([a-z]+)?(?:\[([\w-]+)(?:=(?:"([^"]*)"|([\w-]+)))?\])?$/.exec(selector)) && (m[1] || m[2])) {
+    const value = m[3] !== undefined ? m[3] : m[4];
+    return e => (!m[1] || e.tagName === m[1].toUpperCase()) &&
+      (!m[2] || (e.hasAttribute(m[2]) && (value === undefined || e.getAttribute(m[2]) === value)));
+  }
   throw new Error('selector not supported by the fake DOM: ' + selector);
 }
 
@@ -151,7 +175,8 @@ const root = build(input.page);
 changes = [];  // the snapshots count what the scripts change, not the building of the page
 added = [];
 const listeners = {}, socketHandlers = {}, pending = [], timers = [];
-let requests = 0, connected = false, clock = 0;
+let requests = 0, connected = false, clock = 0, reloads = 0;
+const sent = [];  // every request of the page: {type, url, data, contentType}
 let tabsShown = [];  // the tabs shown through jQuery's .tab('show') during the current step
 
 const document = {
@@ -178,13 +203,20 @@ function showTab(link) {
   tabsShown.push(link.id);
 }
 
-// jQuery, as much as the polls use: $('#' + $.escapeSelector(mount) + 'diskfree'), $('#id'), $(element), .html(),
-// .css(), .attr(), .addClass(), .removeClass(), .tab('show'), $.ajax(). A mount is wrapped by escapeSelector so
-// that it is found as written.
+// jQuery, as much as the polls and static/js/swizzin.js use: $('#' + $.escapeSelector(mount) + 'diskfree'), $('#id'),
+// $('button[data-layout]'), $(element), $(function), .html(), .css(), .attr(), .removeAttr(), .addClass(),
+// .removeClass(), .tab('show'), .each(), .on(), .click(), $.ajax(). A mount is wrapped by escapeSelector so that it is
+// found as written. $(function) runs it when the page is loaded, before the DOMContentLoaded listeners.
+const ready = [];
 function $(selector) {
   let found;
-  if (selector instanceof Element) {
+  if (typeof selector === 'function') {
+    ready.push(selector);
+    return null;
+  } else if (selector instanceof Element) {
     found = [selector];
+  } else if (/^[a-z]*\[/.test(selector)) {
+    found = document.querySelectorAll(selector);
   } else if (/^#[\w-]+$/.test(selector)) {
     const el = document.getElementById(selector.slice(1));
     found = el ? [el] : [];
@@ -207,7 +239,15 @@ function $(selector) {
       return api;
     },
     css(k, v) { found.forEach(e => { e.style[k] = v; }); return api; },
-    attr(k, v) { found.forEach(e => e.setAttribute(k, v)); return api; },
+    attr(k, v) {
+      if (v === undefined) { return found.length ? found[0].getAttribute(k) : undefined; }
+      found.forEach(e => e.setAttribute(k, v));
+      return api;
+    },
+    removeAttr(k) { found.forEach(e => e.removeAttribute(k)); return api; },
+    each(f) { found.forEach((e, i) => f.call(e, i, e)); return api; },
+    on(event, f) { found.forEach(e => e.addEventListener(event, f)); return api; },
+    click(f) { return api.on('click', f); },
     addClass(c) { found.forEach(e => e.classList.add(...c.split(' '))); return api; },
     removeClass(c) { found.forEach(e => e.classList.remove(...c.split(' '))); return api; },
     tab(action) {
@@ -219,14 +259,28 @@ function $(selector) {
   return api;
 }
 $.escapeSelector = s => '\u0001' + s + '\u0002';
-$.ajax = options => { requests += 1; pending.push(options); };
+$.ajax = options => {
+  requests += 1;
+  pending.push(options);
+  sent.push({ type: options.type || 'GET', url: options.url, data: options.data === undefined ? null : options.data,
+              contentType: options.contentType || null });
+};
 
 class FakeDate extends Date { static now() { return clock; } }  // the clock of the steps ({at: ms})
 const fakeConsole = Object.assign(Object.create(console), {
   error: (...args) => { process.exitCode = 1; console.error('console.error in the page:', ...args); },
 });
-const sandbox = { document, $, console: fakeConsole, Date: FakeDate,
-                  window: { location: { protocol: 'http:', port: '8333' } },
+// The MutationObservers of the page: told about the children added to or removed from what they observe.
+const observers = [];
+class FakeMutationObserver {
+  constructor(callback) { this.callback = callback; }
+  observe(target, options) {
+    if (!options || !options.childList || options.subtree) { throw new Error('only {childList: true} is observed'); }
+    observers.push({ observer: this, target });
+  }
+}
+const sandbox = { document, $, console: fakeConsole, Date: FakeDate, MutationObserver: FakeMutationObserver,
+                  window: { location: { protocol: 'http:', port: '8333', reload: () => { reloads += 1; } } },
                   setTimeout: f => { timers.push(f); } };
 if (input.socketio) {
   // Several handlers per event, as socket.io allows: live_stats.js and live_graphs.js both listen to "live".
@@ -309,6 +363,12 @@ function snapshot() {
     disks, liveMark: card ? card.hasAttribute('data-live') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
     watch: object((input.watch || []).map(id => [id, text(id)])),
+    attrs: object((input.attrs || []).map(([id, name]) => {
+      const e = document.getElementById(id);
+      return [id + ' ' + name, e ? e.getAttribute(name) : undefined];
+    })),
+    sections: object(root.querySelectorAll('details').map(d => [d.getAttribute('data-section'), d.open])),
+    sent: sent.slice(), reloads,
     graphs: graphs(),
     storage: stored ? Object.assign({}, stored) : null,
   };
@@ -332,9 +392,24 @@ function snapshot() {
   return snap;
 }
 
+// What a browser does once the script that changed the page has run: "toggle" for each <details> opened or closed,
+// then the MutationObservers, each told once.
+function settle() {
+  toggled.splice(0).forEach(d => (d.listeners.toggle || []).forEach(f => f({ type: 'toggle', target: d })));
+  const changed = [...mutated];
+  mutated.clear();
+  const told = new Set();
+  observers.forEach(({ observer, target }) => {
+    if (changed.includes(target) && !told.has(observer)) { told.add(observer); observer.callback([], observer); }
+  });
+}
+
+mutated.clear();  // the building of the page is no mutation
 input.scripts.forEach(path => vm.runInContext(fs.readFileSync(path, 'utf8'), sandbox, { filename: path }));
 if (input.poll) { vm.runInContext(input.poll, sandbox, { filename: 'diskusage() of the dashboard' }); }
+ready.forEach(f => f.call(document));
 (listeners.DOMContentLoaded || []).forEach(f => f());
+settle();
 
 function send(event, data) {  // a websocket event, to every handler of the page; an event nobody listens to is lost
   if (!connected) { throw new Error('no ' + event + ' handler: socket.io not connected'); }
@@ -350,10 +425,20 @@ function play(step) {
     send('live', { disks: step.live });
   } else if (step.event) {
     send(step.event, step.data);
-  } else if (step.click) {
-    const el = document.getElementById(step.click);
-    if (!el) { throw new Error('nothing to click: #' + step.click); }
-    if (!el.hasAttribute('disabled')) { (el.listeners.click || []).forEach(f => f({ type: 'click', target: el })); }
+  } else if (step.click || step.clickOn || step.summary) {
+    let el;
+    if (step.summary) {
+      const d = root.querySelectorAll('details').find(x => x.getAttribute('data-section') === step.summary);
+      el = d && d.children.find(c => c.tagName === 'SUMMARY');
+    } else {
+      el = step.click ? document.getElementById(step.click) : root.querySelector(step.clickOn);
+    }
+    if (!el) { throw new Error('nothing to click: ' + JSON.stringify(step)); }
+    if (!el.hasAttribute('disabled')) {
+      const event = { type: 'click', target: el, stopPropagation: () => {}, preventDefault: () => {} };
+      (el.listeners.click || []).forEach(f => f.call(el, event));
+      if (el.tagName === 'SUMMARY') { el.parentNode.open = !el.parentNode.open; }  // what a browser does then
+    }
   } else if ('hidden' in step) {
     document.hidden = step.hidden;
     (listeners.visibilitychange || []).forEach(f => f());
@@ -376,6 +461,7 @@ function play(step) {
 const out = [snapshot()];
 input.steps.forEach(step => {
   play(step);
+  settle();
   out.push(snapshot());
 });
 process.stdout.write(JSON.stringify(out));

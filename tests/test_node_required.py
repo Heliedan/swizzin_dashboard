@@ -1,8 +1,8 @@
 """The JavaScript tests are never skipped in silence by the automatic tests.
 
-tests/test_disk_alert_js.py, tests/test_bandwidth_js.py and tests/test_live_graphs_js.py need Node.js. On a
-computer without it, their tests are skipped. The automatic tests (.github/workflows/tests.yml) set REQUIRE_NODE=1:
-there, a missing node must fail, not skip them all.
+tests/test_disk_alert_js.py, tests/test_bandwidth_js.py, tests/test_live_graphs_js.py and tests/test_overview_js.py
+need Node.js. On a computer without it, their tests are skipped. The automatic tests (.github/workflows/tests.yml) set
+REQUIRE_NODE=1: there, a missing node must fail, not skip them all.
 
 Run from the repository root: python tests/test_node_required.py
 (runs each of them twice, with node hidden: nothing on the machine is touched)."""
@@ -14,7 +14,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS_TESTS = [os.path.join(ROOT, "tests", name)
-            for name in ("test_disk_alert_js.py", "test_bandwidth_js.py", "test_live_graphs_js.py")]
+            for name in ("test_disk_alert_js.py", "test_bandwidth_js.py", "test_live_graphs_js.py",
+                         "test_overview_js.py")]
 
 
 def without_node(**env):

@@ -59,26 +59,28 @@
     {%- endif -%}
 </p>
 {% else %}
+{# data-period: the Overview layout shows these totals at the top of its page (static/js/overview.js); a row's cells are
+   the period, then Down, Up (and Total). #}
 <table class="table table-condensed table-hover table-dark table-borderless">
     {{ heading('Period') }}
     <tbody>
-        <tr>
+        <tr data-period="hour">
             <td>This Hour</td>
             {{ amounts(hour) }}
         </tr>
-        <tr>
+        <tr data-period="lasthour">
             <td>Last Hour</td>
             {{ amounts(lasthour) }}
         </tr>
-        <tr>
+        <tr data-period="day">
             <td>This Day</td>
             {{ amounts(day) }}
         </tr>
-        <tr>
+        <tr data-period="month">
             <td>This Month</td>
             {{ amounts(month) }}
         </tr>
-        <tr>
+        <tr data-period="alltime">
             <td>All Time</td>
             {{ amounts(alltime) }}
         </tr>
