@@ -309,6 +309,7 @@ class Helper:
         os.makedirs(opts.logs, mode=0o700, exist_ok=True)
         self._recover()
         self.listener = self._listen()
+        self.waker = self._wake_on_signals()
 
     # --- socket and clients ---------------------------------------------------------------
 
@@ -334,6 +335,18 @@ class Helper:
         self.sel.register(s, selectors.EVENT_READ, None)
         return s
 
+    def _wake_on_signals(self):
+        """Python runs a signal's handler (SIGTERM: stop) in the main thread, between two steps of its own code. A
+        signal that comes in the last moment before select() starts to wait does not interrupt it: alone, the
+        handler would run only once select() returns, up to marker_every seconds later. Python also writes each
+        signal it catches to this socket, which select() watches: select() returns at once, and the handler runs."""
+        waker, self.notifier = socket.socketpair()  # the notifier stays open as long as the service runs
+        for s in (waker, self.notifier):
+            s.setblocking(False)
+        signal.set_wakeup_fd(self.notifier.fileno(), warn_on_full_buffer=False)
+        self.sel.register(waker, selectors.EVENT_READ, None)
+        return waker
+
     def run(self):
         """Serves until the panel is gone (PANEL_MARKER), and never stops in the middle of a job for that."""
         next_look = time.monotonic() + self.opts.marker_every
@@ -341,7 +354,9 @@ class Helper:
             running = self.job is not None and self.job.phase != "done"
             wait = max(next_look - time.monotonic(), 0)
             for key, events in self.sel.select(min(wait, 0.5) if running else wait):
-                if key.data is None:
+                if key.fileobj is self.waker:  # a signal, whose handler ran as select() returned
+                    self.waker.recv(4096)
+                elif key.data is None:
                     self._accept()
                 elif isinstance(key.data, Job):
                     self._on_pty(key.data)

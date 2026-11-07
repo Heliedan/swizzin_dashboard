@@ -18,6 +18,18 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HELPER = os.path.join(ROOT, "store-helper", "swizzin_store.py")
+# Starts the helper with SIGTERM blocked in its main thread: a second thread, which does nothing else, catches it.
+# The signal then never interrupts the main thread's select(), as when it comes just before select() starts to wait.
+SIGNALS_TO_A_SECOND_THREAD = r"""
+import runpy, signal, sys, threading
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+def catch():
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+    threading.Event().wait()
+threading.Thread(target=catch, daemon=True).start()
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
 
 
 def fake_swizzin(base):
@@ -35,7 +47,8 @@ def fake_swizzin(base):
 
 
 class Helper:
-    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False, max_file_size=None, env=None, marker=None):
+    def __init__(self, base, allow_uid=None, extra=(), ignore_sigint=False, max_file_size=None, env=None, marker=None,
+                 launcher=()):
         self.path = os.path.join(base, "store.sock")
         uid = os.getuid() if allow_uid is None else allow_uid
         try:
@@ -50,15 +63,23 @@ class Helper:
             with open(self.marker, "w") as f:
                 f.write("# the panel's copy of the helper\n")
         self.proc = subprocess.Popen(
-            [sys.executable, "-I", "-B", HELPER, "--socket", self.path, "--scripts", os.path.join(base, "scripts"),
-             "--lang", os.path.join(base, "lang_en"), "--locks", os.path.join(base, "locks"),
+            [sys.executable, "-I", "-B", *launcher, HELPER, "--socket", self.path,
+             "--scripts", os.path.join(base, "scripts"), "--lang", os.path.join(base, "lang_en"),
+             "--locks", os.path.join(base, "locks"),
              "--allow-uid", str(uid), "--logs", os.path.join(base, "logs"), "--panel-marker", self.marker, *extra],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env,
             preexec_fn=lambda: self._limits(ignore_sigint, max_file_size))
         for _ in range(100):
-            if os.path.exists(self.path) or self.proc.poll() is not None:
+            if self.listening() or self.proc.poll() is not None:
                 break
             time.sleep(0.05)
+
+    def listening(self):
+        """The socket file appears at bind(), a moment before the helper listens: a connection in between is refused.
+        Linux lists a listening socket in /proc/net/unix with the flag __SO_ACCEPTCON (00010000)."""
+        with open("/proc/net/unix") as f:
+            return any(len(fields) == 8 and fields[3] == "00010000" and fields[7] == self.path
+                       for fields in map(str.split, f))
 
     @staticmethod
     def _limits(ignore_sigint, max_file_size):
@@ -164,6 +185,24 @@ class StoreHelper(unittest.TestCase):
         finally:
             for s in clients:
                 s.close()
+
+    def test_sigterm_never_waits_for_the_end_of_select(self):
+        """Python runs a signal's handler in the main thread, between two steps of its own code. A SIGTERM that came
+        in the last moment before select() started to wait used to be seen only when select() returned, up to 15
+        seconds later (--marker-every): now and then, a tearDown failed on the timeout of stop()."""
+        self.helper.stop()
+        self.helper = Helper(self.base, extra=("--marker-every", "3600"), launcher=("-c", SIGNALS_TO_A_SECOND_THREAD))
+        with self.helper.connect() as s:
+            self.assertTrue(ask(s, b'{"op": "catalogue"}\n')["ok"])
+        time.sleep(0.5)  # it waits in select() again
+        try:
+            self.helper.stop()
+        except subprocess.TimeoutExpired:
+            self.helper.proc.kill()  # tearDown collects it
+        # 0: stopped by its handler, which removes the socket
+        self.assertEqual(self.helper.proc.returncode, 0, "SIGTERM waited for the end of select()")
+        self.assertFalse(os.path.exists(self.helper.path))
+        self.helper = Helper(self.base)  # for tearDown
 
     def test_custom_blocked_list(self):
         self.helper.stop()
