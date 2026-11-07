@@ -2,6 +2,9 @@
 .DS_Store
 __pycache__/
 *.pyc
-# The layout chosen by each account (core/layouts.py), written by the panel next to swizzin.cfg
+# The files the panel keeps next to swizzin.cfg (core/statefile.py): the layout chosen by each account
+# (core/layouts.py), the history of the disks and the panel's sign-ins (planned), and their files being written
 /layouts.json
-/.layouts-*.tmp
+/disk-history.json
+/signins.json
+/.*.tmp

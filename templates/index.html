@@ -9,9 +9,9 @@
   <link href="https://cdn.jsdelivr.net/gh/gitbrent/bootstrap4-toggle@3.6.1/css/bootstrap4-toggle.min.css" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/swizzin.css')}}">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/live_stats.css')}}">
-  {%- if layout == 'overview' %}
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/overview.css')}}">
-  {%- endif %}
+  {%- if layout == 'overview' %}{# core/overview_blocks.py #}{% for name in overview_blocks.stylesheets() %}
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename=name)}}">
+  {%- endfor %}{% endif %}
 </head>
 <body>
 <div class="d-flex" id="wrapper">
@@ -66,9 +66,9 @@
 <script src="{{ url_for('static', filename='js/swizzin.js') }}"></script>
 <script src="{{ url_for('static', filename='js/live_graphs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/live_stats.js') }}"></script>
-{%- if layout == 'overview' %}
-<script src="{{ url_for('static', filename='js/overview.js') }}"></script>
-{%- endif %}
+{%- if layout == 'overview' %}{# core/overview_blocks.py #}{% for name in overview_blocks.scripts() %}
+<script src="{{ url_for('static', filename=name) }}"></script>
+{%- endfor %}{% endif %}
 
 
 <script>

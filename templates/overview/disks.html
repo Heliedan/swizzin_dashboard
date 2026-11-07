@@ -1,0 +1,6 @@
+{# Block "disks" of core/overview_blocks.py: Disk Info, a section of Details. Without a disk quota, or the admin. #}
+        {% if disk_card %}
+        <details class="card ov-section" data-section="disks"><summary class="card-header">Disk Info</summary>
+          {% include 'diskinfo_live.html' %}
+        </details>
+        {% endif %}
