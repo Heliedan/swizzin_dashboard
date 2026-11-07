@@ -1,6 +1,19 @@
+{% from 'live_graph.html' import live_graph %}
 <div class="card border-dark mt-3">
     <div class="card-header">Network Info</div>
     <div class="card-body">
+      {# Live graph of the download and upload speed of the default interface, over the last 5 minutes, drawn by
+         static/js/live_graphs.js from the "speed" event. For the admin only, like the speed table below. #}
+      {% if config.ADMIN_USER == user %}
+        <div class="small d-flex flex-wrap align-items-center mb-1">
+          <span class="mr-3"><span class="live-graph-key live-graph-rx"></span>Down <span id="net-graph-rx-now">--</span></span>
+          <span class="mr-3"><span class="live-graph-key live-graph-tx"></span>Up <span id="net-graph-tx-now">--</span></span>
+          <span class="ml-auto text-muted">Last 5 minutes</span>
+        </div>
+        <div class="mb-3">
+          {{ live_graph('net-graph', ['rx', 'tx'], 'Download and upload speed over the last 5 minutes') }}
+        </div>
+      {% endif %}
       {% if config.SHAREDSERVER == True %}
         <div class="row">
             <div class="col">

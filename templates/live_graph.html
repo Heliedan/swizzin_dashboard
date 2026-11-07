@@ -1,0 +1,17 @@
+{# A live graph of the last 5 minutes, drawn by static/js/live_graphs.js (see the README): an SVG 300 units wide, one
+   per second, and 100 high, stretched to the card. For each key, a filled area and a line (#id-key-area, #id-key-line),
+   empty when the page loads; the lines and the grid keep their width (vector-effect). The scale's labels are HTML
+   over it (#id-top, #id-middle), so they are not stretched.
+   label: what the graph shows, for screen readers (the values are in the card's text). #}
+{% macro live_graph(id, keys, label, top='', middle='') %}
+<div class="live-graph-plot" id="{{ id }}" role="img" aria-label="{{ label }}">
+  <svg viewBox="0 -1 300 102" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <line class="live-graph-grid" x1="0" y1="0" x2="300" y2="0" vector-effect="non-scaling-stroke"></line>
+    <line class="live-graph-grid" x1="0" y1="50" x2="300" y2="50" vector-effect="non-scaling-stroke"></line>
+    {% for key in keys %}<path class="live-graph-area live-graph-{{ key }}" id="{{ id }}-{{ key }}-area"></path>{% endfor %}
+    {% for key in keys %}<path class="live-graph-line live-graph-{{ key }}" id="{{ id }}-{{ key }}-line" vector-effect="non-scaling-stroke"></path>{% endfor %}
+  </svg>
+  <span class="live-graph-scale" id="{{ id }}-top">{{ top }}</span>
+  <span class="live-graph-scale live-graph-middle" id="{{ id }}-middle">{{ middle }}</span>
+</div>
+{% endmacro %}

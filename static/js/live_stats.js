@@ -229,5 +229,7 @@
       if (d.ram) { ram(d.ram); }
       if (d.disks) { disks(d.disks); alerts(d.disks); }
     });
+    // The live graphs (static/js/live_graphs.js) listen on this same connection, after the cards.
+    if (window.LiveGraphs) { window.LiveGraphs.attach(socket); }
   });
 })();

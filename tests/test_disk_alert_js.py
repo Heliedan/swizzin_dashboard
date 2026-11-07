@@ -37,7 +37,8 @@ import swizzin  # noqa: E402
 NODE = shutil.which("node")
 NODE_REQUIRED = os.environ.get("REQUIRE_NODE") == "1"  # the automatic tests: never skipped in silence
 FAKE_DOM = os.path.join(ROOT, "tests", "fake_dom.js")
-LIVE_STATS = os.path.join(ROOT, "static", "js", "live_stats.js")
+# The dashboard's scripts that the fake DOM can run, when the page loads them (static/js/swizzin.js needs jQuery).
+LIVE_SCRIPTS = ("live_graphs.js", "live_stats.js")
 TRAP = "/mnt/<img src=x onerror=alert(1)> it's \"mine\" & yours"
 MOUNTS = ["/", "/srv/media", TRAP]
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
@@ -57,6 +58,21 @@ def polled(pct, free="7.66 GiB", alert=None):
 ALERTS = {"/": disk("50.00"), "/srv/media": disk("92.34", "7.66 GiB", "warning"),
           TRAP: disk("96.10", "3.90 GiB", "critical")}
 CALM = {"/": disk("50.00"), "/srv/media": disk("89.99", "10.01 GiB"), TRAP: disk("99.00", "1.00 GiB")}
+
+
+def page_scripts(tree):
+    """The paths of the LIVE_SCRIPTS that the page loads (<script src=".../static/js/...">), in its order."""
+    out = []
+
+    def walk(node):
+        src = node.get("attrs", {}).get("src", "") if node.get("tag") == "script" else ""
+        name = os.path.basename(src)
+        if "/static/js/" in src and name in LIVE_SCRIPTS:
+            out.append(os.path.join(ROOT, "static", "js", name))
+        for child in node.get("children", []):
+            walk(child)
+    walk(tree)
+    return out
 
 
 class Tree(HTMLParser):
@@ -102,8 +118,10 @@ class NodeTest(unittest.TestCase):
         if not NODE:
             raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
 
-    def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False):
-        """Loads the dashboard in the fake DOM, plays the steps; returns a snapshot after loading and after each."""
+    def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False, watch=()):
+        """Loads the dashboard in the fake DOM, plays the steps; returns a snapshot after loading and after each.
+
+        The live scripts run as the page loads them: live_stats.js, and live_graphs.js before it."""
         page = dashboard(user, mounts, quota)
         tree = Tree()
         tree.feed(page)
@@ -112,7 +130,8 @@ class NodeTest(unittest.TestCase):
             found = re.search(r"\(function diskusage\(\) \{.*?\n\}\)\(\);", page, re.S)
             self.assertIsNotNone(found, "diskusage() not found in the dashboard")
             source = found.group(0)
-        payload = {"page": tree.root, "live_stats": LIVE_STATS, "poll": source, "socketio": socketio, "steps": steps}
+        payload = {"page": tree.root, "scripts": page_scripts(tree.root), "poll": source, "socketio": socketio,
+                   "watch": list(watch), "steps": steps}
         r = subprocess.run([NODE, FAKE_DOM], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
         if r.returncode:
             self.fail(r.stderr)

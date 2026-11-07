@@ -15,7 +15,7 @@ import subprocess
 import unittest
 from unittest import mock
 
-from test_disk_alert_js import FAKE_DOM, LIVE_STATS, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin
+from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, page_scripts, swizzin
 from fake_vnstat import EMPTY, FakeVnstat, traffic, vnstat_json
 
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:tester").decode()}
@@ -53,7 +53,7 @@ class Refresh(unittest.TestCase):
         self.assertIsNotNone(found, "vnstat_top10() not found in the dashboard")
         tree = Tree()
         tree.feed(page)
-        payload = {"page": tree.root, "live_stats": LIVE_STATS, "poll": found.group(0), "socketio": True,
+        payload = {"page": tree.root, "scripts": page_scripts(tree.root), "poll": found.group(0), "socketio": True,
                    "steps": steps}
         r = subprocess.run([NODE, FAKE_DOM], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
         if r.returncode:
