@@ -53,3 +53,14 @@ path.live-graph-line { fill: none; stroke-width: 1.5; stroke-linejoin: round; st
 .live-graph-key { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 2px; margin-right: 0.35em; }
 .live-graph-key.live-graph-rx { background-color: #3498db; }
 .live-graph-key.live-graph-tx { background-color: #00bc8c; }
+/* Down and Up in the bandwidth graph's legend: buttons that hide or show their series. 44 px high, the size of a
+   finger on a tablet. Their look follows aria-pressed (the series is shown) and aria-disabled (the last series shown,
+   which cannot be hidden): no other class to keep in step. A hidden series: label struck through and greyed, empty
+   key; its current value stays readable. The last series shown loses its outline: an outlined item can be pressed,
+   which a tablet shows without a pointer or a title. */
+.live-graph-toggle { min-height: 2.75rem; padding: 0 0.6rem; color: inherit; font-size: inherit; border: 1px solid rgba(255, 255, 255, 0.15); }
+.live-graph-toggle:hover { color: inherit; background-color: rgba(255, 255, 255, 0.06); }
+.live-graph-toggle[aria-pressed="false"] { color: #999; }
+.live-graph-toggle[aria-pressed="false"] .live-graph-label { text-decoration: line-through; }
+.live-graph-toggle[aria-pressed="false"] .live-graph-key { background-color: transparent; box-shadow: inset 0 0 0 1px #999; }
+.live-graph-toggle[aria-disabled="true"], .live-graph-toggle[aria-disabled="true"]:hover { cursor: not-allowed; border-color: transparent; background-color: transparent; }

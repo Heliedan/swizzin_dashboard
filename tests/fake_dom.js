@@ -7,6 +7,8 @@
      poll       the source of a poll found in the page (diskusage(), vnstat_top10()), or null
      socketio   false: socket.io did not load (no "io")
      watch      ids of elements whose text the snapshots give (optional)
+     storage    the browser's localStorage: absent (none), {key: value} (works, starts with these), "throws" (blocked:
+                any use throws), "full" (reads find nothing, writes throw)
      steps      a list of steps, each one of:
                 {live: disks}           a live reading with these disks only
                 {event: name, data: d}  any websocket event ("speed", "live"...); "disconnect" takes no data
@@ -16,6 +18,7 @@
                 {tab: id}               a click on a tab of the page (Bootstrap's tabs)
                 {scroll: [id, top]}     the user scrolling an element
                 {hidden: true|false}    the browser tab hidden or shown again ("visibilitychange")
+                {click: id}             a click on that element (a disabled button gets none, as in a browser)
                 {batch: [steps]}        several steps, with one snapshot after the last one
                 a step can also carry {at: ms}: the clock (Date.now()) when it happens
    and prints a list of snapshots of the page: after loading, then after each step.
@@ -46,6 +49,7 @@ class Element {
     this.parentNode = null;
     this.style = {};
     this.scrollTop = 0;
+    this.listeners = {};
     const el = this;
     this.classList = {
       add(...names) { const s = el.classes(); names.forEach(n => s.add(n)); el.setAttribute('class', [...s].join(' ')); },
@@ -102,6 +106,7 @@ class Element {
   }
   querySelectorAll(selector) { return descendants(this).filter(matcher(selector)); }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  addEventListener(event, f) { (this.listeners[event] = this.listeners[event] || []).push(f); }
 }
 
 function adopt(parent, node, index) {
@@ -230,6 +235,20 @@ if (input.socketio) {
     return { on: (event, f) => { (socketHandlers[event] = socketHandlers[event] || []).push(f); }, emit: () => {} };
   } };
 }
+// localStorage, as the input says: none, a working one, one that throws at any use (blocked), or a full one.
+const stored = input.storage && typeof input.storage === 'object' ? Object.assign({}, input.storage) : null;
+if (stored) {
+  sandbox.window.localStorage = {
+    getItem: k => (Object.prototype.hasOwnProperty.call(stored, k) ? stored[k] : null),
+    setItem: (k, v) => { stored[k] = String(v); },
+    removeItem: k => { delete stored[k]; },
+  };
+} else if (input.storage === 'throws') {
+  Object.defineProperty(sandbox.window, 'localStorage', { get() { throw new Error('SecurityError: storage blocked'); } });
+} else if (input.storage === 'full') {
+  sandbox.window.localStorage = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); },
+                                  removeItem: () => {} };
+}
 vm.createContext(sandbox);
 
 function colours(el) {
@@ -251,7 +270,10 @@ function graphs() {
     const mine = n => n === plot || own.some(e => e.contains(n)) || plot.contains(n);
     out[plot.id] = {
       d: object(own.filter(e => e.tagName === 'PATH').map(e => [e.id, e.getAttribute('d')])),
-      text: object(own.filter(e => e.tagName !== 'PATH').map(e => [e.id, e.textContent])),
+      text: object(own.filter(e => e.tagName !== 'PATH' && e.tagName !== 'BUTTON').map(e => [e.id, e.textContent])),
+      buttons: object(own.filter(e => e.tagName === 'BUTTON').map(e => [e.id, {
+        type: e.getAttribute('type'), pressed: e.getAttribute('aria-pressed'),
+        disabled: e.getAttribute('aria-disabled'), title: e.getAttribute('title') }])),
       changes: changes.filter(mine).length,
       added: added.filter(a => mine(a.parent)).length,
     };
@@ -288,6 +310,7 @@ function snapshot() {
     pendingRequests: pending.length, requests, timers: timers.length,
     watch: object((input.watch || []).map(id => [id, text(id)])),
     graphs: graphs(),
+    storage: stored ? Object.assign({}, stored) : null,
   };
   const top10 = document.getElementById('top10');
   if (top10) {  // the bandwidth card: its tabs, its panes, and its text outside them (a message)
@@ -327,6 +350,10 @@ function play(step) {
     send('live', { disks: step.live });
   } else if (step.event) {
     send(step.event, step.data);
+  } else if (step.click) {
+    const el = document.getElementById(step.click);
+    if (!el) { throw new Error('nothing to click: #' + step.click); }
+    if (!el.hasAttribute('disabled')) { (el.listeners.click || []).forEach(f => f({ type: 'click', target: el })); }
   } else if ('hidden' in step) {
     document.hidden = step.hidden;
     (listeners.visibilitychange || []).forEach(f => f());
