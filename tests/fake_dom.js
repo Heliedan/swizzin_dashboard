@@ -1,14 +1,17 @@
 'use strict';
-/* A small fake DOM to run static/js/live_stats.js and the /stats/disk poll of the dashboard in Node.js, with no
-   npm package. Driven by tests/test_disk_alert_js.py, which sends on stdin, as JSON:
+/* A small fake DOM to run static/js/live_stats.js and the polls of the dashboard in Node.js, with no npm package.
+   Driven by tests/test_disk_alert_js.py and tests/test_bandwidth_js.py, which send on stdin, as JSON:
      page       the HTML the panel rendered, as a tree: {tag, attrs, children} or {text}
      live_stats the path of static/js/live_stats.js
-     poll       the source of the diskusage() poll found in the page, or null
+     poll       the source of a poll found in the page (diskusage(), vnstat_top10()), or null
      socketio   false: socket.io did not load (no "io")
-     steps      [{live: disks} | {ajax: data} | {timer: true}]: a live reading, the answer to the oldest pending
-                /stats/disk request, or the pending timers firing
+     steps      [{live: disks} | {ajax: data} | {fail: true} | {timer: true} | {tab: id} | {scroll: [id, top]}]:
+                a live reading, the answer to the oldest pending request, its failure, the pending timers firing,
+                a click on a tab (Bootstrap's tabs), the user scrolling an element
    and prints a list of snapshots of the page: after loading, then after each step.
-   Inserting HTML (innerHTML...) throws: system data must only ever go in as text. */
+   Inserting HTML (innerHTML...) throws: system data must only ever go in as text. The one exception is the HTML
+   that the panel renders for #top10 (templates/top.html, escaped by Jinja), which the vnstat_top10() poll inserts
+   with jQuery's .html(): the test gives it already parsed, as {tree}. */
 const fs = require('fs');
 const vm = require('vm');
 
@@ -31,6 +34,7 @@ class Element {
     this.childNodes = [];
     this.parentNode = null;
     this.style = {};
+    this.scrollTop = 0;
     const el = this;
     this.classList = {
       add(...names) { const s = el.classes(); names.forEach(n => s.add(n)); el.setAttribute('class', [...s].join(' ')); },
@@ -111,7 +115,10 @@ function descendants(el) {
 
 function matcher(selector) {  // only the selectors the scripts use: an unknown one fails the test
   let m;
-  if ((m = /^\.([\w-]+)$/.exec(selector))) { return e => e.classList.contains(m[1]); }
+  if ((m = /^(\.[\w-]+)+$/.exec(selector))) {
+    const names = selector.slice(1).split('.');
+    return e => names.every(n => e.classList.contains(n));
+  }
   if ((m = /^\[([\w-]+)\$="([^"]*)"\]$/.exec(selector))) { return e => (e.getAttribute(m[1]) || '').endsWith(m[2]); }
   throw new Error('selector not supported by the fake DOM: ' + selector);
 }
@@ -127,6 +134,7 @@ const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const root = build(input.page);
 const listeners = {}, socketHandlers = {}, pending = [], timers = [];
 let requests = 0;
+let tabsShown = [];  // the tabs shown through jQuery's .tab('show') during the current step
 
 const document = {
   domain: '127.0.0.1',
@@ -137,19 +145,57 @@ const document = {
   addEventListener: (event, f) => { (listeners[event] = listeners[event] || []).push(f); },
 };
 
-// jQuery, as much as the poll uses: $('#' + $.escapeSelector(mount) + 'diskfree'), .html(), .css(), .attr(),
-// .addClass(), .removeClass(), $.ajax(). The mount is wrapped by escapeSelector so that it is found as written.
+// Bootstrap 4's tab('show') on a tab link: the other tabs of its .nav and the other panes of its .tab-content are
+// no longer active; this one and its pane (href="#pane") are. No fade: the panel's tabs have none.
+function showTab(link) {
+  let nav = link.parentNode;
+  while (nav && !(nav.classList && nav.classList.contains('nav'))) { nav = nav.parentNode; }
+  nav.querySelectorAll('.nav-link').forEach(l => { l.classList.remove('active'); l.setAttribute('aria-selected', 'false'); });
+  link.classList.add('active');
+  link.setAttribute('aria-selected', 'true');
+  const pane = document.getElementById(link.getAttribute('href').slice(1));
+  pane.parentNode.children.forEach(p => p.classList.remove('active'));
+  pane.classList.add('active');
+  tabsShown.push(link.id);
+}
+
+// jQuery, as much as the polls use: $('#' + $.escapeSelector(mount) + 'diskfree'), $('#id'), $(element), .html(),
+// .css(), .attr(), .addClass(), .removeClass(), .tab('show'), $.ajax(). A mount is wrapped by escapeSelector so
+// that it is found as written.
 function $(selector) {
-  const m = /^#\u0001([\s\S]*)\u0002(\w+)(?:\.([\w-]+))?$/.exec(selector);
-  if (!m) { throw new Error('selector not supported by the fake jQuery: ' + selector); }
-  const el = document.getElementById(m[1] + m[2]);
-  const found = el && (!m[3] || el.classList.contains(m[3])) ? [el] : [];
+  let found;
+  if (selector instanceof Element) {
+    found = [selector];
+  } else if (/^#[\w-]+$/.test(selector)) {
+    const el = document.getElementById(selector.slice(1));
+    found = el ? [el] : [];
+  } else {
+    const m = /^#\u0001([\s\S]*)\u0002(\w+)(?:\.([\w-]+))?$/.exec(selector);
+    if (!m) { throw new Error('selector not supported by the fake jQuery: ' + selector); }
+    const el = document.getElementById(m[1] + m[2]);
+    found = el && (!m[3] || el.classList.contains(m[3])) ? [el] : [];
+  }
   const api = {
-    html(v) { found.forEach(e => { e.textContent = v; }); return api; },  // the poll only writes sizes and numbers
+    html(v) {
+      found.forEach(e => {
+        if (v !== null && typeof v === 'object' && v.tree) {  // the panel's HTML for #top10, parsed by the test
+          e.textContent = '';
+          v.tree.children.forEach(c => adopt(e, build(c), e.childNodes.length));
+        } else {
+          e.textContent = v;  // the disk poll only writes sizes and numbers
+        }
+      });
+      return api;
+    },
     css(k, v) { found.forEach(e => { e.style[k] = v; }); return api; },
     attr(k, v) { found.forEach(e => e.setAttribute(k, v)); return api; },
     addClass(c) { found.forEach(e => e.classList.add(...c.split(' '))); return api; },
     removeClass(c) { found.forEach(e => e.classList.remove(...c.split(' '))); return api; },
+    tab(action) {
+      if (action !== 'show') { throw new Error('tab() action not supported by the fake jQuery: ' + action); }
+      found.forEach(showTab);
+      return api;
+    },
   };
   return api;
 }
@@ -195,6 +241,21 @@ function snapshot() {
     disks, liveMark: card ? card.hasAttribute('data-live') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
   };
+  const top10 = document.getElementById('top10');
+  if (top10) {  // the bandwidth card: its tabs, its panes, and its text outside them (a message)
+    snap.top10 = {
+      tabs: top10.querySelectorAll('.nav-link').map(a => ({ id: a.id, active: a.classList.contains('active'),
+                                                             selected: a.getAttribute('aria-selected') })),
+      panes: top10.querySelectorAll('.tab-pane').map(p => {
+        const entries = p.querySelectorAll('.bw-entry');  // <tbody>: its first row, its first cell (the date)
+        return { id: p.id, active: p.classList.contains('active'), scrollTop: p.scrollTop, entries: entries.length,
+                 first: entries.length ? entries[0].children[0].children[0].textContent : null };
+      }),
+      text: top10.textContent.replace(/\s+/g, ' ').trim(),
+      tabsShown,
+    };
+  }
+  tabsShown = [];
   changes = [];
   added = [];
   return snap;
@@ -210,10 +271,18 @@ input.steps.forEach(step => {
     if (!socketHandlers.live) { throw new Error('no live handler: socket.io not connected'); }
     socketHandlers.live({ disks: step.live });
   } else if (step.ajax) {
-    if (!pending.length) { throw new Error('no /stats/disk request is pending'); }
+    if (!pending.length) { throw new Error('no request is pending'); }
     pending.shift().success(step.ajax);
+  } else if (step.fail) {  // a network error or an HTTP error other than 401: jQuery calls no success()
+    if (!pending.length) { throw new Error('no request is pending'); }
+    const options = pending.shift();
+    if (options.error) { options.error(); }
   } else if (step.timer) {
     timers.splice(0).forEach(f => f());
+  } else if (step.tab) {
+    showTab(document.getElementById(step.tab));
+  } else if (step.scroll) {
+    document.getElementById(step.scroll[0]).scrollTop = step.scroll[1];
   }
   out.push(snapshot());
 });

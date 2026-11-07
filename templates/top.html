@@ -1,110 +1,122 @@
-{% if config.ADMIN_USER == user %}
-<table class="table table-condensed table-hover table-dark table-borderless">
+{# Bandwidth totals and history of the Network Info card: rendered by /stats/vnstat (admin only), loaded into #top10
+   by the dashboard every 10 minutes (templates/macros.html). See the README. #}
+{% set totals = config.NETWORK_INFO_TOTALS == True %}
+{% macro heading(first) -%}
     <thead class="table-active">
         <tr>
-            <th scope="col">Period</th>
+            <th scope="col">{{ first }}</th>
             <th scope="col" class="text-info text-center">Down</th>
             <th scope="col" class="text-success text-center">Up</th>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<th scope="col" class="text-warning text-center">Total</th>
-			{% endif %}
+            {% if totals %}
+            <th scope="col" class="text-warning text-center">Total</th>
+            {% endif %}
         </tr>
     </thead>
+{%- endmacro %}
+{# One row's amounts; a period vnstat has no entry for shows a dash. #}
+{% macro amounts(row) -%}
+            <td class="text-info text-center">{{ row['rx'] if row else '—' }}</td>
+            <td class="text-success text-center">{{ row['tx'] if row else '—' }}</td>
+            {% if totals %}
+            <td class="text-warning text-center">{{ row['total'] if row else '—' }}</td>
+            {% endif %}
+{%- endmacro %}
+{# A history list: one entry per day or month, its amounts, then a bar as long as its total compared with the largest
+   of the list, received then sent (the colours of Down and Up). The bar repeats the numbers: screen readers skip it. #}
+{% macro history(first, rows) -%}
+<table class="table table-condensed table-dark table-borderless bw-table">
+    {{ heading(first) }}
+    {% for row in rows %}
+    <tbody class="bw-entry">
+        <tr>
+            <td>{{ row['date'] }}</td>
+            {{ amounts(row) }}
+        </tr>
+        <tr class="bw-bar" aria-hidden="true">
+            <td colspan="{{ 4 if totals else 3 }}">
+                <div class="progress">
+                    <div class="progress-bar bg-info" style="width: {{ row['rx_bar'] }}%"></div>
+                    <div class="progress-bar bg-success" style="width: {{ row['tx_bar'] }}%"></div>
+                </div>
+            </td>
+        </tr>
+    </tbody>
+    {% else %}
+    <tbody>
+        <tr><td colspan="{{ 4 if totals else 3 }}" class="text-center text-muted">No data yet</td></tr>
+    </tbody>
+    {% endfor %}
+</table>
+{%- endmacro %}
+{% if config.ADMIN_USER == user %}
+{% if error %}
+<p class="text-center text-muted my-3">
+    {%- if error == 'not-installed' %}No bandwidth data: vnstat is not installed.
+    {%- elif error == 'no-interface' %}No bandwidth data: the server has no default network interface.
+    {%- elif error == 'no-data' %}No bandwidth data yet for {{ interface }}.
+    {%- elif error == 'timeout' %}No bandwidth data: vnstat did not answer in time.
+    {%- else %}No bandwidth data: the answer of vnstat could not be read.
+    {%- endif -%}
+</p>
+{% else %}
+<table class="table table-condensed table-hover table-dark table-borderless">
+    {{ heading('Period') }}
     <tbody>
         <tr>
             <td>This Hour</td>
-            <td class="text-info text-right text-center">{{ hour['rx'] }}</td>
-            <td class="text-success text-center">{{ hour['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ hour['total'] }}</td>
-			{% endif %}
+            {{ amounts(hour) }}
         </tr>
         <tr>
             <td>Last Hour</td>
-            <td class="text-info text-center">{{ lasthour['rx'] }}</td>
-            <td class="text-success text-center">{{ lasthour['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ lasthour['total'] }}</td>
-			{% endif %}
+            {{ amounts(lasthour) }}
         </tr>
         <tr>
             <td>This Day</td>
-            <td class="text-info text-center">{{ day['rx'] }}</td>
-            <td class="text-success text-center">{{ day['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ day['total'] }}</td>
-			{% endif %}
+            {{ amounts(day) }}
         </tr>
         <tr>
             <td>This Month</td>
-            <td class="text-info text-center">{{ month['rx'] }}</td>
-            <td class="text-success text-center">{{ month['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ month['total'] }}</td>
-			{% endif %}
+            {{ amounts(month) }}
         </tr>
         <tr>
             <td>All Time</td>
-            <td class="text-info text-center">{{ alltime['rx'] }}</td>
-            <td class="text-success text-center">{{ alltime['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ alltime['total'] }}</td>
-			{% endif %}
+            {{ amounts(alltime) }}
         </tr>
     </tbody>
 </table>
 
-<table class="table table-condensed table-hover table-dark table-borderless">
-    <thead class="table-active">
-        <tr>
-            <th scope="col">Date</th>
-            <th scope="col" class="text-info text-center">Down</th>
-            <th scope="col" class="text-success text-center">Up</th>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<th scope="col" class="text-warning text-center">Total</th>
-			{% endif %}
-        </tr>
-    </thead>
-    <tbody>
-        {% for day in timeline %}
-        <tr>
-            <td>{{ day['date'] }}</td>
-            <td class="text-info text-center">{{ day['rx'] }}</td>
-            <td class="text-success text-center">{{ day['tx'] }}</td>
-			{% if config.NETWORK_INFO_TOTALS == True %}
-			<td class="text-warning text-center">{{ day['total'] }}</td>
-			{% endif %}
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+{# Bootstrap's tabs (data-toggle); the dashboard keeps the open tab, and how far it was scrolled, at each refresh. #}
+<ul class="nav nav-tabs bw-tabs" role="tablist">
+    <li class="nav-item">
+        <a class="nav-link active" id="bw-days-tab" data-toggle="tab" href="#bw-days" role="tab" aria-controls="bw-days" aria-selected="true">Days</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" id="bw-months-tab" data-toggle="tab" href="#bw-months" role="tab" aria-controls="bw-months" aria-selected="false">Months</a>
+    </li>
+</ul>
+<div class="tab-content mb-3">
+    <div class="tab-pane active bw-history" id="bw-days" role="tabpanel" aria-labelledby="bw-days-tab" tabindex="0">
+        {{ history('Date', days) }}
+    </div>
+    <div class="tab-pane bw-history" id="bw-months" role="tabpanel" aria-labelledby="bw-months-tab" tabindex="0">
+        {{ history('Month', months) }}
+    </div>
+</div>
 {% if config.NETWORK_INFO_TOP == True %}
 <div class="text-center">
     <h5>Top Transfer Days</h5>
 </div>
 <table class="table table-condensed table-hover table-dark table-borderless">
-    <thead class="table-active">
-        <tr>
-            <th scope="col">Date</th>
-            <th scope="col" class="text-info text-center">Down</th>
-            <th scope="col" class="text-success text-center">Up</th>
-            {% if config.NETWORK_INFO_TOTALS == True %}
-            <th scope="col" class="text-warning text-center">Total</th>
-            {% endif %}
-        </tr>
-    </thead>
+    {{ heading('Date') }}
     <tbody>
         {% for t in top %}
         <tr>
             <td>{{ t['date'] }}</td>
-            <td class="text-info text-center">{{ t['rx'] }}</td>
-            <td class="text-success text-center">{{ t['tx'] }}</td>
-            {% if config.NETWORK_INFO_TOTALS == True %}
-            <td class="text-warning text-center">{{ t['total'] }}</td>
-            {% endif %}
+            {{ amounts(t) }}
         </tr>
         {% endfor %}
     </tbody>
 </table>
+{% endif %}
 {% endif %}
 {% endif %}
