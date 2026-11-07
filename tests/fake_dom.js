@@ -1,17 +1,28 @@
 'use strict';
-/* A small fake DOM to run static/js/live_stats.js and the polls of the dashboard in Node.js, with no npm package.
-   Driven by tests/test_disk_alert_js.py and tests/test_bandwidth_js.py, which send on stdin, as JSON:
+/* A small fake DOM to run the dashboard's live scripts (static/js/live_graphs.js, static/js/live_stats.js) and its
+   polls in Node.js, with no npm package. Driven by tests/test_disk_alert_js.py, tests/test_bandwidth_js.py and
+   tests/test_live_graphs_js.py, which send on stdin, as JSON:
      page       the HTML the panel rendered, as a tree: {tag, attrs, children} or {text}
-     live_stats the path of static/js/live_stats.js
+     scripts    the paths of the scripts to run, in the order of the page
      poll       the source of a poll found in the page (diskusage(), vnstat_top10()), or null
      socketio   false: socket.io did not load (no "io")
-     steps      [{live: disks} | {ajax: data} | {fail: true} | {timer: true} | {tab: id} | {scroll: [id, top]}]:
-                a live reading, the answer to the oldest pending request, its failure, the pending timers firing,
-                a click on a tab (Bootstrap's tabs), the user scrolling an element
+     watch      ids of elements whose text the snapshots give (optional)
+     steps      a list of steps, each one of:
+                {live: disks}           a live reading with these disks only
+                {event: name, data: d}  any websocket event ("speed", "live"...); "disconnect" takes no data
+                {ajax: data}            the answer to the oldest pending request
+                {fail: true}            the failure of the oldest pending request
+                {timer: true}           the pending timers firing
+                {tab: id}               a click on a tab of the page (Bootstrap's tabs)
+                {scroll: [id, top]}     the user scrolling an element
+                {hidden: true|false}    the browser tab hidden or shown again ("visibilitychange")
+                {batch: [steps]}        several steps, with one snapshot after the last one
+                a step can also carry {at: ms}: the clock (Date.now()) when it happens
    and prints a list of snapshots of the page: after loading, then after each step.
    Inserting HTML (innerHTML...) throws: system data must only ever go in as text. The one exception is the HTML
    that the panel renders for #top10 (templates/top.html, escaped by Jinja), which the vnstat_top10() poll inserts
-   with jQuery's .html(): the test gives it already parsed, as {tree}. */
+   with jQuery's .html(): the test gives it already parsed, as {tree}. A script that writes to console.error fails
+   the run: the live graphs report their own errors there instead of throwing. */
 const fs = require('fs');
 const vm = require('vm');
 
@@ -132,12 +143,15 @@ function build(node) {
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const root = build(input.page);
+changes = [];  // the snapshots count what the scripts change, not the building of the page
+added = [];
 const listeners = {}, socketHandlers = {}, pending = [], timers = [];
-let requests = 0;
+let requests = 0, connected = false, clock = 0;
 let tabsShown = [];  // the tabs shown through jQuery's .tab('show') during the current step
 
 const document = {
   domain: '127.0.0.1',
+  hidden: false,
   getElementById: id => descendants(root).find(e => e.id === id) || null,
   createElement: tag => new Element(tag),
   querySelector: selector => root.querySelector(selector),
@@ -202,15 +216,47 @@ function $(selector) {
 $.escapeSelector = s => '\u0001' + s + '\u0002';
 $.ajax = options => { requests += 1; pending.push(options); };
 
-const sandbox = { document, $, console, window: { location: { protocol: 'http:', port: '8333' } },
+class FakeDate extends Date { static now() { return clock; } }  // the clock of the steps ({at: ms})
+const fakeConsole = Object.assign(Object.create(console), {
+  error: (...args) => { process.exitCode = 1; console.error('console.error in the page:', ...args); },
+});
+const sandbox = { document, $, console: fakeConsole, Date: FakeDate,
+                  window: { location: { protocol: 'http:', port: '8333' } },
                   setTimeout: f => { timers.push(f); } };
 if (input.socketio) {
-  sandbox.io = { connect: () => ({ on: (event, f) => { socketHandlers[event] = f; }, emit: () => {} }) };
+  // Several handlers per event, as socket.io allows: live_stats.js and live_graphs.js both listen to "live".
+  sandbox.io = { connect: () => {
+    connected = true;
+    return { on: (event, f) => { (socketHandlers[event] = socketHandlers[event] || []).push(f); }, emit: () => {} };
+  } };
 }
 vm.createContext(sandbox);
 
 function colours(el) {
   return el ? [...el.classes()].filter(c => c.startsWith('bg-') || c === 'disk-unavailable').sort() : null;
+}
+
+function object(pairs) {  // Object.fromEntries, missing from node 10 (Ubuntu 20.04)
+  const out = {};
+  pairs.forEach(([k, v]) => { out[k] = v; });
+  return out;
+}
+
+// Each live graph (.live-graph-plot, static/js/live_graphs.js) and the elements whose id starts with its own: the
+// "d" of its paths, the text of the others, and how many of them were changed or added during the step.
+function graphs() {
+  const out = {};
+  root.querySelectorAll('.live-graph-plot').forEach(plot => {
+    const own = descendants(root).filter(e => e.id.startsWith(plot.id + '-'));
+    const mine = n => n === plot || own.some(e => e.contains(n)) || plot.contains(n);
+    out[plot.id] = {
+      d: object(own.filter(e => e.tagName === 'PATH').map(e => [e.id, e.getAttribute('d')])),
+      text: object(own.filter(e => e.tagName !== 'PATH').map(e => [e.id, e.textContent])),
+      changes: changes.filter(mine).length,
+      added: added.filter(a => mine(a.parent)).length,
+    };
+  });
+  return out;
 }
 
 function snapshot() {
@@ -240,6 +286,8 @@ function snapshot() {
     summaryChanges: summary ? changes.filter(n => summary.contains(n)).length : 0,
     disks, liveMark: card ? card.hasAttribute('data-live') : null,
     pendingRequests: pending.length, requests, timers: timers.length,
+    watch: object((input.watch || []).map(id => [id, text(id)])),
+    graphs: graphs(),
   };
   const top10 = document.getElementById('top10');
   if (top10) {  // the bandwidth card: its tabs, its panes, and its text outside them (a message)
@@ -261,15 +309,27 @@ function snapshot() {
   return snap;
 }
 
-vm.runInContext(fs.readFileSync(input.live_stats, 'utf8'), sandbox, { filename: input.live_stats });
+input.scripts.forEach(path => vm.runInContext(fs.readFileSync(path, 'utf8'), sandbox, { filename: path }));
 if (input.poll) { vm.runInContext(input.poll, sandbox, { filename: 'diskusage() of the dashboard' }); }
 (listeners.DOMContentLoaded || []).forEach(f => f());
 
-const out = [snapshot()];
-input.steps.forEach(step => {
-  if (step.live) {
+function send(event, data) {  // a websocket event, to every handler of the page; an event nobody listens to is lost
+  if (!connected) { throw new Error('no ' + event + ' handler: socket.io not connected'); }
+  (socketHandlers[event] || []).forEach(f => f(data));
+}
+
+function play(step) {
+  if ('at' in step) { clock = step.at; }
+  if (step.batch) {
+    step.batch.forEach(play);
+  } else if (step.live) {
     if (!socketHandlers.live) { throw new Error('no live handler: socket.io not connected'); }
-    socketHandlers.live({ disks: step.live });
+    send('live', { disks: step.live });
+  } else if (step.event) {
+    send(step.event, step.data);
+  } else if ('hidden' in step) {
+    document.hidden = step.hidden;
+    (listeners.visibilitychange || []).forEach(f => f());
   } else if (step.ajax) {
     if (!pending.length) { throw new Error('no request is pending'); }
     pending.shift().success(step.ajax);
@@ -284,6 +344,11 @@ input.steps.forEach(step => {
   } else if (step.scroll) {
     document.getElementById(step.scroll[0]).scrollTop = step.scroll[1];
   }
+}
+
+const out = [snapshot()];
+input.steps.forEach(step => {
+  play(step);
   out.push(snapshot());
 });
 process.stdout.write(JSON.stringify(out));
