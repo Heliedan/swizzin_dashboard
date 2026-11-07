@@ -411,6 +411,15 @@ appstatus();
 })();
 
 (function vnstat_top10() {
+  // Bandwidth totals and history (templates/top.html): only the admin has their place (templates/netinfo.html),
+  // and /stats/vnstat answers only the admin.
+  var box = document.getElementById("top10");
+  if (!box) {
+    return;
+  }
+  // Schedule the next refresh before the request, so that a failed request
+  // does not stop the polling.
+  setTimeout(vnstat_top10, 600000);
   $.ajax({
     url: "{{ url_for('vnstat') }}",
     statusCode: {
@@ -419,12 +428,17 @@ appstatus();
       }
     },
     success: function(data) {
-      $("#top10").html(data);
-    setTimeout(function(){
-      vnstat_top10()
-    }, 600000);
-  }
-});
+      // The history tab that was open stays open, scrolled as it was.
+      var open = box.querySelector(".bw-history.active");
+      var scrolled = open ? open.scrollTop : 0;
+      $(box).html(data);
+      var pane = open && document.getElementById(open.id);
+      if (pane) {
+        $("#" + open.id + "-tab").tab("show");
+        pane.scrollTop = scrolled;
+      }
+    }
+  });
 })();
 
   window.onload = function() {

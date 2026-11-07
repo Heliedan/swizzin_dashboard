@@ -1,10 +1,11 @@
 """The JavaScript tests are never skipped in silence by the automatic tests.
 
-tests/test_disk_alert_js.py needs Node.js. On a computer without it, its tests are skipped. The automatic tests
-(.github/workflows/tests.yml) set REQUIRE_NODE=1: there, a missing node must fail, not skip them all.
+tests/test_disk_alert_js.py and tests/test_bandwidth_js.py need Node.js. On a computer without it, their tests are
+skipped. The automatic tests (.github/workflows/tests.yml) set REQUIRE_NODE=1: there, a missing node must fail, not
+skip them all.
 
 Run from the repository root: python tests/test_node_required.py
-(runs tests/test_disk_alert_js.py twice, with node hidden: nothing on the machine is touched)."""
+(runs each of them twice, with node hidden: nothing on the machine is touched)."""
 import os
 import re
 import subprocess
@@ -12,7 +13,7 @@ import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-JS_TESTS = os.path.join(ROOT, "tests", "test_disk_alert_js.py")
+JS_TESTS = [os.path.join(ROOT, "tests", name) for name in ("test_disk_alert_js.py", "test_bandwidth_js.py")]
 
 
 def without_node(**env):
@@ -24,21 +25,25 @@ def without_node(**env):
     return out
 
 
-def run_js_tests(env):
-    return subprocess.run([sys.executable, JS_TESTS], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
+def run_js_tests(path, env):
+    return subprocess.run([sys.executable, path], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
 
 
 class NodeRequired(unittest.TestCase):
     def test_without_node_on_a_computer_the_tests_are_skipped(self):
-        r = run_js_tests(without_node())
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stderr, r"\nOK \(skipped=[1-9][0-9]*\)\n$")
+        for path in JS_TESTS:
+            with self.subTest(os.path.basename(path)):
+                r = run_js_tests(path, without_node())
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertRegex(r.stderr, r"\nOK \(skipped=[1-9][0-9]*\)\n$")
 
     def test_without_node_with_require_node_they_fail(self):
-        r = run_js_tests(without_node(REQUIRE_NODE="1"))
-        self.assertNotEqual(r.returncode, 0, r.stderr)
-        self.assertIn("node is not installed, and REQUIRE_NODE=1", r.stderr)
-        self.assertNotIn("skipped", r.stderr)
+        for path in JS_TESTS:
+            with self.subTest(os.path.basename(path)):
+                r = run_js_tests(path, without_node(REQUIRE_NODE="1"))
+                self.assertNotEqual(r.returncode, 0, r.stderr)
+                self.assertIn("node is not installed, and REQUIRE_NODE=1", r.stderr)
+                self.assertNotIn("skipped", r.stderr)
 
     def test_the_automatic_tests_require_node(self):
         with open(os.path.join(ROOT, ".github", "workflows", "tests.yml"), encoding="utf-8") as f:
