@@ -11,9 +11,9 @@
 
 <img src="docs/screenshots/disk-alert-orange.png" alt="Disk almost full: an orange banner at the top of the dashboard, /mnt/data is 92% used, and its bar is orange" width="49%"> <img src="docs/screenshots/disk-alert-red.png" alt="Disk almost full: a red banner at the top of the dashboard, /mnt/data is 97% used, and its bar is red" width="49%">
 
-<img src="docs/screenshots/bandwidth-days.png" alt="Network Info card: the totals, then the Days tab, one line per day with received, sent and total and a bar under it, then the top transfer days" width="300"> <img src="docs/screenshots/bandwidth-months.png" alt="Network Info card with the Months tab open: one line per month, its bar compared with the largest month" width="300">
+<img src="docs/screenshots/bandwidth-days.png" alt="Network Info card: the graph of the last 5 minutes, the speed table and the totals, then the Days tab, one line per day with received, sent and total and a bar under it, then the top transfer days" width="300"> <img src="docs/screenshots/bandwidth-months.png" alt="Network Info card with the Months tab open: one line per month, its bar compared with the largest month" width="300">
 
-*Screenshots made with demo data: the dashboard with the live cards, then the Disk Info card, one box per disk, with a disk that went away shown as UNAVAILABLE, then the disk almost full banner, orange from 90 % and red from 95 %, then the bandwidth history of the Network Info card, by day and by month.*
+*Screenshots made with demo data: the dashboard with the live cards and their graphs of the last 5 minutes, then the Disk Info card, one box per disk, with a disk that went away shown as UNAVAILABLE, then the disk almost full banner, orange from 90 % and red from 95 %, then the bandwidth history of the Network Info card, by day and by month.*
 
 ### What is different from upstream (`master`, b2eca76)
 
