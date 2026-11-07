@@ -14,7 +14,6 @@ import core.config
 import requests
 import time
 from werkzeug.middleware.proxy_fix import ProxyFix
-import calendar
 import logging
 
 logging.basicConfig(level=logging.WARN)
@@ -313,74 +312,26 @@ def loadavg(user):
 @app.route('/stats/vnstat')
 @htpasswd.required
 def vnstat(user):
-    #stats = []
+    # Bandwidth totals and history of the Network Info card, which only the admin sees (templates/netinfo.html):
+    # nobody else makes the panel run vnstat. One vnstat call per request, and a message in the card instead of an
+    # HTTP 500 when vnstat has nothing to give (see the README).
+    if user != app.config['ADMIN_USER']:
+        flask.abort(403)
     interface = get_default_interface()
-    vnstat_info = vnstat_data(interface, "h")
-    vnstat_jsonversion = vnstat_info["jsonversion"]
-    if vnstat_jsonversion == "1":
-        qh = "hours"
-        qd = "days"
-        qm = "months"
-        qt = "tops"
-        thisday = 0
-        thismonth = 0
-        hour = int(time.strftime("%H"))
-        lasthour = hour - 1
-        if lasthour == -1:
-            lasthour = 23
-        read_unit = GetHumanReadableKB
-    elif vnstat_jsonversion == "2":
-        qh = "hour"
-        qd = "day"
-        qm = "month"
-        qt = "top"
-        thisday = vnstat_data(interface, "d")['interfaces'][0]['traffic']['day'][-1]["id"]
-        thismonth = vnstat_data(interface, "m")['interfaces'][0]['traffic']['month'][-1]["id"]
-        hour = vnstat_info['interfaces'][0]['traffic']['hour'][-1]["id"]
-        lasthour = vnstat_info['interfaces'][0]['traffic']['hour'][-2]["id"]
-        read_unit = GetHumanReadableB
-    statsh = vnstat_parse(interface, "h", qh, read_unit, hour)
-    statslh = vnstat_parse(interface, "h", qh, read_unit, lasthour)
-    statsd = vnstat_parse(interface, "d", qd, read_unit, thisday)
-    statsm = vnstat_parse(interface, "m", qm, read_unit, thismonth)
-    statsa = vnstat_parse(interface, "h", "total", read_unit)
-    #statsa = vnstat_parse(interface, "m", "total", 0)
-    days = vnstat_data(interface, "d")['interfaces'][0]['traffic'][qd][::-1]
-    timeline = []
-    for t in days[:10]:
-        date = t['date']
-        year = date['year']
-        month = calendar.month_abbr[date['month']]
-        day = date['day']
-        date = "{month} {day}, {year}".format(year=year, month=month, day=day)
-        rx = read_unit(t['rx'])
-        tx =read_unit(t['tx'])
-        total = read_unit(t['tx'] + t['rx'])
-        timeline.append({"date": date, "rx": rx, "tx": tx, "total": total})
-
-    if app.config['NETWORK_INFO_TOP']:
-        if not app.config['NETWORK_INFO_CUTOFF'] or app.config['NETWORK_INFO_CUTOFF'] == "YYYY-MM-DD":
-            tops = vnstat_data(interface, "t")['interfaces'][0]['traffic'][qt]
-        else:
-            tops = vnstat_data(interface, "t", app.config['NETWORK_INFO_CUTOFF'])['interfaces'][0]['traffic'][qt]
-        top = []
-        for t in tops[:app.config['NETWORK_INFO_TOPSTATS']]:
-            date = t['date']
-            year = date['year']
-            month = calendar.month_abbr[date['month']]
-            day = date['day']
-            date = "{month} {day}, {year}".format(year=year, month=month, day=day)
-            rx = read_unit(t['rx'])
-            tx =read_unit(t['tx'])
-            total = read_unit(t['tx'] + t['rx'])
-            top.append({"date": date, "rx": rx, "tx": tx, "total": total})
-
-    columns = {"date", "rx", "tx", "total"}
-    #stats = []
-    #stats.extend({"statsh": statsh, "statslh": statslh, "statsd": statsd, "statsm": statsm, "statsa": statsa, "top": top})
-    #print(stats)
-    #return flask.jsonify({"statsh": statsh, "statslh": statslh, "statsd": statsd, "statsm": statsm, "statsa": statsa, "top": top})
-    return flask.render_template('top.html', user=user, timeline=timeline, day=statsd, month=statsm, hour=statsh, lasthour=statslh, alltime=statsa, colnames=columns, top=top if app.config['NETWORK_INFO_TOP'] else None)
+    top_count = app.config['NETWORK_INFO_TOPSTATS'] if app.config['NETWORK_INFO_TOP'] else 0
+    try:
+        cutoff = top_cutoff(app.config['NETWORK_INFO_CUTOFF'])
+    except (ValueError, TypeError):
+        app.logger.warning("NETWORK_INFO_CUTOFF %r is not a date written YYYY-MM-DD: ignored",
+                           app.config['NETWORK_INFO_CUTOFF'])
+        cutoff = None
+    try:
+        stats = bandwidth(vnstat_traffic(interface), top_count, cutoff)
+    except VnstatUnavailable as e:
+        if e.detail is not None:  # what the admin can look into: vnstat's own error, a timeout, an odd answer
+            app.logger.warning("Bandwidth of %s: %s", interface, e)
+        return flask.render_template('top.html', user=user, interface=interface, error=e.reason)
+    return flask.render_template('top.html', user=user, interface=interface, error=None, **stats)
 
 @app.route('/stats/disk')
 @htpasswd.required

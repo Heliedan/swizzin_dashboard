@@ -7,9 +7,11 @@ import subprocess as sp
 import json
 import shutil
 import datetime
+import calendar
 import re
 import logging
 from pwd import getpwnam
+from eventlet.patcher import original
 
 log = logging.getLogger(__name__)
 
@@ -223,33 +225,121 @@ def systemctl(function, application):
         result = sp.run(('sudo', 'systemctl', function, application), stdout=sp.DEVNULL).returncode
     return result
 
-def vnstat_data(interface, mode, begin=False):
-    if begin is not False:
-        vnstat = sp.run(('vnstat', '-i', interface, '-b', begin, "--json", mode), stdout=sp.PIPE)
-    else:
-        vnstat = sp.run(('vnstat', '-i', interface, '--json', mode), stdout=sp.PIPE)
-    data = json.loads(vnstat.stdout.decode('utf-8'))
-    #data = vnstat.stdout.decode('utf-8')
-    return data
+# Bandwidth of the Network Info card (/stats/vnstat, admin only; see the README). Every system Swizzin installs on
+# ships vnstat 2 (Ubuntu 20.04 and Debian 11: 2.6, Ubuntu 22.04: 2.9, Debian 12: 2.10, Ubuntu 24.04: 2.12): one
+# `vnstat --json` gives every list at once (JSON version 2, in bytes). vnstat 1 (JSON version 1) is not supported.
+VNSTAT_TIMEOUT = 10  # seconds: vnstat reads a small local database, it answers at once unless something is wrong
+HISTORY_DAYS = 62  # vnstat 2 keeps 62 days and 25 months by default
+HISTORY_MONTHS = 25
+# Under eventlet (swizzin.py), a timeout with pipes raises the TimeoutExpired of eventlet's own copy of the subprocess
+# module, which is not subprocess.TimeoutExpired: catch both (subprocess.run() stops the program either way).
+_TIMEOUT_EXPIRED = (sp.TimeoutExpired, original('subprocess').TimeoutExpired)
 
-def vnstat_parse(interface, mode, query, read_unit, position=False):
-    if position is not False:
-        #result = vnstat_data(interface, mode)['interfaces'][0]['traffic'][query][position]
-        result = vnstat_data(interface, mode)['interfaces'][0]['traffic'][query]
-        for p in result:
-            if p["id"] == int(position):
-                data = {}
-                data['rx'] = read_unit(p['rx'])
-                data['tx'] = read_unit(p['tx'])
-                data['total'] = read_unit(p['tx'] + p['rx'])
-                result = data
-                break
-    else:
-        result = vnstat_data(interface, mode)['interfaces'][0]['traffic'][query]
-        result['total'] = read_unit(result['rx'] + result['tx'])
-        result['rx'] = read_unit(result['rx'])
-        result['tx'] = read_unit(result['tx'])
-    return result
+
+class VnstatUnavailable(Exception):
+    """No bandwidth data to show. reason is a word that templates/top.html turns into a sentence: "no-interface",
+    "not-installed", "no-data", "timeout" or "unreadable". detail, when there is one, is for the panel's log."""
+
+    def __init__(self, reason, detail=None):
+        super().__init__(reason if detail is None else "{}: {}".format(reason, detail))
+        self.reason = reason
+        self.detail = detail
+
+
+def vnstat_traffic(interface):
+    """The "traffic" object vnstat recorded for this interface, from a single `vnstat -i <interface> --json`."""
+    if not interface:
+        raise VnstatUnavailable("no-interface")
+    try:
+        done = sp.run(('vnstat', '-i', interface, '--json'), stdout=sp.PIPE, stderr=sp.PIPE, timeout=VNSTAT_TIMEOUT)
+    except FileNotFoundError:
+        raise VnstatUnavailable("not-installed")
+    except _TIMEOUT_EXPIRED:
+        raise VnstatUnavailable("timeout", "no answer within {} seconds".format(VNSTAT_TIMEOUT))
+    except OSError as e:
+        raise VnstatUnavailable("unreadable", e)
+    if done.returncode != 0:
+        # The interface is not in vnstat's database (yet), or there is no database: vnstat says which on stderr.
+        said = done.stderr.decode('utf-8', 'replace').strip()
+        raise VnstatUnavailable("no-data", said or "exit code {}".format(done.returncode))
+    try:
+        data = json.loads(done.stdout.decode('utf-8'))
+        if data["jsonversion"] != "2":
+            raise ValueError("JSON version {!r}, not 2".format(data["jsonversion"]))
+        return data["interfaces"][0]["traffic"]
+    except (ValueError, KeyError, IndexError, TypeError) as e:
+        raise VnstatUnavailable("unreadable", repr(e))
+
+
+def bandwidth(traffic, top_count, cutoff=None):
+    """What templates/top.html shows, from vnstat_traffic(): the same totals and top days as before this edition
+    read vnstat once, and the history of the last days and months, newest first.
+    top_count: how many top days (NETWORK_INFO_TOPSTATS); cutoff: a datetime.date, to rank only the days since then
+    (as `vnstat -b` did), or None for vnstat's own top list.
+    Sizes are written as before: "1.23 GB" (1 GB = 10^9 bytes)."""
+    try:
+        if not (traffic["hour"] or traffic["day"] or traffic["month"]):
+            raise VnstatUnavailable("no-data")  # vnstat follows the interface, but has saved nothing yet
+        hours = traffic["hour"]
+        if cutoff is None:
+            tops = traffic["top"]
+        else:
+            tops = sorted((d for d in traffic["day"] if _vnstat_date(d) >= cutoff),
+                          key=lambda d: d["rx"] + d["tx"], reverse=True)
+        return {
+            # The last entry of each list, as before: vnstat lists the oldest first.
+            "hour": _amounts(hours[-1]) if hours else None,
+            "lasthour": _amounts(hours[-2]) if len(hours) > 1 else None,
+            "day": _amounts(traffic["day"][-1]) if traffic["day"] else None,
+            "month": _amounts(traffic["month"][-1]) if traffic["month"] else None,
+            "alltime": _amounts(traffic["total"]),
+            "days": _history(traffic["day"][-HISTORY_DAYS:], _day_label),
+            "months": _history(traffic["month"][-HISTORY_MONTHS:], _month_label),
+            "top": [dict(_amounts(d), date=_day_label(d)) for d in tops[:top_count]],
+        }
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
+        raise VnstatUnavailable("unreadable", repr(e))
+
+
+def top_cutoff(setting):
+    """NETWORK_INFO_CUTOFF as a datetime.date, or None when it is not set ("YYYY-MM-DD", its default, or empty).
+    Raises ValueError when it is not a date written YYYY-MM-DD."""
+    if not setting or setting == "YYYY-MM-DD":
+        return None
+    return datetime.datetime.strptime(setting, "%Y-%m-%d").date()
+
+
+def _amounts(entry):
+    return {"rx": GetHumanReadableB(entry['rx']), "tx": GetHumanReadableB(entry['tx']),
+            "total": GetHumanReadableB(entry['rx'] + entry['tx'])}
+
+
+def _vnstat_date(entry):
+    date = entry['date']
+    return datetime.date(date['year'], date['month'], date['day'])
+
+
+def _day_label(entry):
+    date = entry['date']
+    return "{month} {day}, {year}".format(month=calendar.month_abbr[date['month']], day=date['day'], year=date['year'])
+
+
+def _month_label(entry):
+    date = entry['date']
+    return "{month} {year}".format(month=calendar.month_abbr[date['month']], year=date['year'])
+
+
+def _history(entries, label):
+    """The entries newest first, each with its bar: received then sent, in percent of the largest total of the list."""
+    largest = max((e['rx'] + e['tx'] for e in entries), default=0)
+    rows = []
+    for e in reversed(entries):
+        row = _amounts(e)
+        row["date"] = label(e)
+        row["rx_bar"] = "{:.2f}".format(e['rx'] * 100 / largest if largest else 0)
+        row["tx_bar"] = "{:.2f}".format(e['tx'] * 100 / largest if largest else 0)
+        rows.append(row)
+    return rows
 
 def disk_usage(location):
     total, used, free = shutil.disk_usage(location)

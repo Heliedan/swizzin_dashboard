@@ -177,3 +177,34 @@ body {
       column-count: 3;
   }
 }
+
+/* Bandwidth history of the Network Info card (templates/top.html) */
+.bw-history {
+  max-height: 22rem;  /* about ten entries, as many as the table it replaced: the others scroll */
+  overflow-y: auto;
+  color-scheme: dark;  /* a dark scrollbar, like the card */
+}
+
+.bw-table {
+  margin-bottom: 0;
+}
+
+.bw-table thead th {
+  position: sticky;  /* the column names stay in sight while the list scrolls */
+  top: 0;
+  z-index: 1;
+  background-color: #2c2c2c;  /* .table-active on the card (#303030 and 7.5 % black), opaque */
+}
+
+.bw-table .bw-entry:hover {
+  background-color: rgba(255, 255, 255, 0.075);  /* .table-dark.table-hover, for both rows of an entry */
+}
+
+.bw-table .bw-bar td {
+  padding: 0 2px 4px;
+}
+
+.bw-table .bw-bar .progress {
+  height: 4px;
+  margin-bottom: 0;
+}
