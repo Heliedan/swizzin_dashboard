@@ -118,10 +118,12 @@ class NodeTest(unittest.TestCase):
         if not NODE:
             raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
 
-    def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False, watch=()):
+    def run_page(self, steps, mounts=MOUNTS, user="tester", quota=False, socketio=True, poll=False, watch=(),
+                 storage=None):
         """Loads the dashboard in the fake DOM, plays the steps; returns a snapshot after loading and after each.
 
-        The live scripts run as the page loads them: live_stats.js, and live_graphs.js before it."""
+        The live scripts run as the page loads them: live_stats.js, and live_graphs.js before it. storage: the
+        browser's localStorage, as tests/fake_dom.js takes it (None: the browser has none)."""
         page = dashboard(user, mounts, quota)
         tree = Tree()
         tree.feed(page)
@@ -131,7 +133,7 @@ class NodeTest(unittest.TestCase):
             self.assertIsNotNone(found, "diskusage() not found in the dashboard")
             source = found.group(0)
         payload = {"page": tree.root, "scripts": page_scripts(tree.root), "poll": source, "socketio": socketio,
-                   "watch": list(watch), "steps": steps}
+                   "watch": list(watch), "storage": storage, "steps": steps}
         r = subprocess.run([NODE, FAKE_DOM], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
         if r.returncode:
             self.fail(r.stderr)
