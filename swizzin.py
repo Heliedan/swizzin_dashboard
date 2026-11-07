@@ -62,11 +62,16 @@ if app.config['RATELIMIT_ENABLED'] == True:
 
 from core.util import *
 from core.custom.live_stats import live_stats, read_thresholds, alert_level, mount_devices, mounts_read_apart, PROBE  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
+from core import layouts
 try:  # App Store page (core/custom/store, see the README): a problem there must not stop the panel
     from core.custom import store as app_store
     app_store.register(app, socketio, htpasswd)
 except Exception:
     app.logger.exception("App Store disabled: it could not be loaded")
+
+# Layout of the dashboard chosen by each account, Classic or Overview (see the README): kept next to swizzin.cfg.
+layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))
+app.jinja_env.globals["dashboard_layouts"] = layouts.LAYOUTS  # the choices of the account menu (templates/macros.html)
 
 #Prepare the background threads
 thread = None
@@ -203,7 +208,24 @@ def index(user):
         vendor = "sbio"
     else:
         vendor = "swizzin"
-    return flask.render_template('index.html', title='{user} - swizzin dashboard'.format(user=user), user=user, pages=pages, quota=quota, vendor=vendor, mounts=mounts, async_mode=socketio.async_mode)
+    layout = layout_choices.get(user)  # never fails: a broken file gives the default layout
+    return flask.render_template('index.html', title='{user} - swizzin dashboard'.format(user=user), user=user, pages=pages, quota=quota, vendor=vendor, mounts=mounts, async_mode=socketio.async_mode, layout=layout)
+
+@app.route('/layout', methods=['POST'])
+@htpasswd.required
+def set_layout(user):
+    """The layout chosen in the account menu (see the README), kept for the account logged in: never for one named in
+    the request. JSON only, like /apps/service: a form of another site cannot send it."""
+    data = flask.request.get_json(silent=True)  # None for another content type or a body that is not JSON
+    name = data.get('layout') if isinstance(data, dict) else None
+    if not layouts.known(name):
+        return flask.jsonify(error='unknown layout'), 400
+    try:
+        layout_choices.set(user, name)
+    except OSError as e:
+        app.logger.warning("The layout of %s could not be saved in %s: %s", user, layout_choices.path, e)
+        return flask.jsonify(error='not saved'), 503
+    return flask.jsonify(layout=name)
 
 @socketio.on('connect', namespace='/websocket')
 def socket_connect(auth=None):  # auth: what a client may send; not used here, but must not make the handler fail

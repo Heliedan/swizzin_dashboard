@@ -2,3 +2,6 @@
 .DS_Store
 __pycache__/
 *.pyc
+# The layout chosen by each account (core/layouts.py), written by the panel next to swizzin.cfg
+/layouts.json
+/.layouts-*.tmp

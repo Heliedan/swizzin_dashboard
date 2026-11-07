@@ -16,7 +16,7 @@ f{% macro build_sidebar(pages, vendor) %}
 </div>
 {% endmacro %}
 
-{% macro build_nav(user, apps) %}
+{% macro build_nav(user, apps, layout=None) %}
 <div id="page-content-wrapper">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <button class="btn btn-primary" id="menu-toggle">«</button>
@@ -65,6 +65,9 @@ f{% macro build_sidebar(pages, vendor) %}
                 <a class="dropdown-item" href="https://discord.gg/sKjs9UM">Discord</a>
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" href="https://swizzin.ltd">Documentation</a>
+                {%- if layout %}
+                {{ layout_menu(layout) }}
+                {%- endif %}
               </div>
           </li>
         </ul>
@@ -72,7 +75,7 @@ f{% macro build_sidebar(pages, vendor) %}
   </nav>
 {% endmacro %}
 
-{% macro build_nav_shared(user, apps, vendor) %}
+{% macro build_nav_shared(user, apps, vendor, layout=None) %}
 <div id="page-content-wrapper">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <button class="btn btn-primary" id="menu-toggle">«</button>
@@ -119,6 +122,9 @@ f{% macro build_sidebar(pages, vendor) %}
                 <a class="dropdown-item" href="https://discord.gg/StaAybe3rm">Discord</a>
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" href="https://docs.hostingby.design/">Documentation</a>
+                {%- if layout %}
+                {{ layout_menu(layout) }}
+                {%- endif %}
               </div>
               {% else %}
               <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
@@ -127,6 +133,9 @@ f{% macro build_sidebar(pages, vendor) %}
                 <a class="dropdown-item" href="https://discord.gg/sKjs9UM">Discord</a>
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" href="https://docs.swizzin.net">Documentation</a>
+                {%- if layout %}
+                {{ layout_menu(layout) }}
+                {%- endif %}
               </div>
               {% endif %}
           </li>
@@ -134,6 +143,20 @@ f{% macro build_sidebar(pages, vendor) %}
       </div>
   </nav>
 {% endmacro %}
+
+{# The layouts of the dashboard, at the end of the account menu (see the README): the one shown is ticked, a click on
+   another one saves it for this account, then the page loads again with it (static/js/swizzin.js). Only on the
+   dashboard: the pages that do not pass `layout` to the menu have none. #}
+{% macro layout_menu(layout) -%}
+<div class="dropdown-divider"></div>
+                <div role="group" aria-labelledby="layout-menu-title">
+                  <h6 class="dropdown-header" id="layout-menu-title">Layout</h6>
+                  {%- for name, label in dashboard_layouts.items() %}
+                  <button type="button" class="dropdown-item layout-choice{{ ' active' if name == layout }}" data-layout="{{ name }}" data-url="{{ url_for('set_layout') }}"{{ ' aria-current="true"'|safe if name == layout }}><span class="layout-tick" aria-hidden="true" style="display:inline-block;width:1.25em">{{ '✓' if name == layout }}</span>{{ label }}</button>
+                  {%- endfor %}
+                  <p class="dropdown-item-text small text-warning mb-0" id="layout-error" role="alert" hidden>Not saved: try again.</p>
+                </div>
+{%- endmacro %}
 
 {% macro build_app_table(apps) %}
 <div class="card border-dark mt-3">

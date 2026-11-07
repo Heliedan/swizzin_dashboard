@@ -1,0 +1,121 @@
+{# The Overview layout of the dashboard, chosen in the account menu (see the README); templates/index.html shows it in
+   place of the Classic cards. At a glance: four tiles (CPU, Memory, Disk /, Network), each with its level in words and
+   its last 5 minutes. Then the bandwidth graph with the totals of vnstat, next to the services; then every card of the
+   Classic layout, in sections closed by default.
+   Same data, same rights, same element ids and the same scripts as Classic: nothing new is asked of the server. The
+   tiles are filled by static/js/live_stats.js, their small graphs by static/js/live_graphs.js, the totals and the
+   sections by static/js/overview.js; the look is in static/css/overview.css. #}
+{% from 'live_graph.html' import live_graph, bandwidth_graph %}
+{% set admin = config.ADMIN_USER == user %}
+{% set disk_card = (quota == False or admin) %}
+{% macro amounts(id) -%}
+<span class="ov-down"><span aria-hidden="true">↓</span><span class="sr-only">Down</span> <span id="{{ id }}-rx">--</span></span>
+<span class="ov-up"><span aria-hidden="true">↑</span><span class="sr-only">Up</span> <span id="{{ id }}-tx">--</span></span>
+{%- endmacro %}
+<div class="container-fluid overview">
+  {# "Disk almost full" banner, as in Classic (templates/index.html): same condition as the Disk Info card. #}
+  {% if disk_card %}
+    <div id="disk-alert"></div>
+    <div id="disk-alert-summary" class="sr-only" role="status" aria-live="polite"></div>
+  {% endif %}
+
+  <section class="ov-block" aria-labelledby="ov-glance">
+    <div class="ov-heading">
+      <h2 class="ov-title" id="ov-glance">At a glance</h2>
+      <span class="ov-hint">Live, with the last 5 minutes</span>
+    </div>
+    <div class="ov-tiles">
+      <div class="ov-tile" id="tile-cpu">
+        <div class="ov-tile-head"><h3 class="ov-tile-label">CPU</h3><span class="ov-badge" id="tile-cpu-badge">--</span></div>
+        <div class="ov-tile-value" id="tile-cpu-value">--</div>
+        <div class="ov-tile-info"><span id="tile-cpu-cores">--</span> cores · load <span id="load1m">--</span></div>
+        {{ live_graph('cpu-spark', ['used'], 'CPU used over the last 5 minutes') }}
+      </div>
+      <div class="ov-tile" id="tile-ram">
+        <div class="ov-tile-head"><h3 class="ov-tile-label">Memory</h3><span class="ov-badge" id="tile-ram-badge">--</span></div>
+        <div class="ov-tile-value" id="tile-ram-value">--</div>
+        <div class="ov-tile-info" id="tile-ram-info">--</div>
+        {{ live_graph('ram-spark', ['used'], 'Memory used over the last 5 minutes') }}
+      </div>
+      {% if disk_card and '/' in mounts %}
+      <div class="ov-tile" id="tile-disk">
+        <div class="ov-tile-head"><h3 class="ov-tile-label">Disk /</h3><span class="ov-badge" id="tile-disk-badge">--</span></div>
+        <div class="ov-tile-value" id="tile-disk-value">--</div>
+        <div class="ov-tile-info" id="tile-disk-info">--</div>
+        {{ live_graph('disk-spark', ['used'], 'Space used on / over the last 5 minutes') }}
+      </div>
+      {% endif %}
+      {% if admin %}
+      <div class="ov-tile" id="tile-net">
+        <div class="ov-tile-head"><h3 class="ov-tile-label">Network</h3><span class="ov-badge" id="tile-net-badge">--</span></div>
+        <div class="ov-tile-value ov-net-value">
+          <span class="ov-down"><span aria-hidden="true">↓</span><span class="sr-only">Down</span> <span id="net-spark-rx-now">--</span></span>
+          <span class="ov-up"><span aria-hidden="true">↑</span><span class="sr-only">Up</span> <span id="net-spark-tx-now">--</span></span>
+        </div>
+        <div class="ov-tile-info">Interface <span id="tile-net-interface">--</span></div>
+        {{ live_graph('net-spark', ['rx', 'tx'], 'Download and upload speed over the last 5 minutes') }}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="ov-row">
+    {% if admin %}
+    {# The bandwidth graph and its legend, as in Classic's Network Info card (which no longer has it here), and the
+       totals of vnstat, read from that card's bandwidth history when it is refreshed. #}
+    <section class="card ov-network" aria-labelledby="ov-network">
+      <div class="card-header"><h2 class="ov-card-title" id="ov-network">Network</h2></div>
+      <div class="card-body">
+        {{ bandwidth_graph() }}
+        <div class="ov-periods">
+          <div class="ov-period"><span class="ov-period-label">This hour</span><span class="ov-period-value">{{ amounts('ov-hour') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">Today</span><span class="ov-period-value">{{ amounts('ov-day') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">This month</span><span class="ov-period-value">{{ amounts('ov-month') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">All time</span><span class="ov-period-value">{{ amounts('ov-alltime') }}</span></div>
+        </div>
+        <p class="ov-periods-note" id="ov-periods-note" hidden></p>
+      </div>
+    </section>
+    {% endif %}
+    {{ macros.build_app_table(apps=pages) }}
+  </div>
+
+  {# The cards of the Classic layout, unchanged: each one in a <details> element, which the keyboard and screen readers
+     know, closed unless this browser remembers it open (static/js/overview.js). Its own header gives way to the
+     section's. On a wide screen, two columns that stack on their own: the machine (CPU, RAM) on the left, the disks
+     and the network on the right, so that a section opened in one column moves nothing in the other; one column, in
+     the same order, on a narrower screen. live-stack: where static/js/live_stats.js reads the address of the panel. #}
+  <section class="ov-block" aria-labelledby="ov-details">
+    <div class="ov-heading">
+      <h2 class="ov-title" id="ov-details">Details</h2>
+      <span class="ov-hint">The cards of the Classic layout</span>
+    </div>
+    <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
+      <div class="ov-column">
+        <details class="card ov-section" data-section="cpu"><summary class="card-header">CPU Info</summary>
+          {% include 'cpuinfo.html' %}
+        </details>
+        <details class="card ov-section" data-section="ram"><summary class="card-header">RAM Info</summary>
+          {% include 'raminfo_live.html' %}
+        </details>
+      </div>
+      <div class="ov-column">
+        {% if disk_card %}
+        <details class="card ov-section" data-section="disks"><summary class="card-header">Disk Info</summary>
+          {% include 'diskinfo_live.html' %}
+        </details>
+        {% endif %}
+        {% if quota == True %}
+        <details class="card ov-section" data-section="quota"><summary class="card-header">Disk Quota Info</summary>
+          {% include 'quotainfo.html' %}
+        </details>
+        {% endif %}
+        {% if (config.SHAREDSERVER == True or admin) %}
+        <details class="card ov-section" data-section="network"><summary class="card-header">Network Info</summary>
+          {% include 'netinfo.html' %}
+        </details>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</div>

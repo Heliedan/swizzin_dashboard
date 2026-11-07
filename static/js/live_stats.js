@@ -2,11 +2,15 @@
    Same element ids and, for CPU and RAM, same thresholds (75 % / 90 %) as the panel's original scripts
    (templates/macros.html).
    "Disk almost full" banner: the disks take the colour of their alert level, with the
-   DISK_WARN_PERCENT and DISK_CRIT_PERCENT thresholds of swizzin.cfg. See the README. */
+   DISK_WARN_PERCENT and DISK_CRIT_PERCENT thresholds of swizzin.cfg. See the README.
+   The tiles of the Overview layout too (templates/overview.html), with the same thresholds: see tile(). */
 (function () {
   'use strict';
 
-  function levelClass(pct) { return pct > 90 ? 'bg-danger' : (pct > 75 ? 'bg-warning' : 'bg-success'); }
+  // Level of a CPU or RAM reading: above 75 % warning, above 90 % critical.
+  function level(pct) { return pct > 90 ? 'critical' : (pct > 75 ? 'warning' : 'ok'); }
+  var LEVEL_CLASS = { ok: 'bg-success', warning: 'bg-warning', critical: 'bg-danger' };
+  function levelClass(pct) { return LEVEL_CLASS[level(pct)]; }
 
   // cls: a forced colour (disks), else the one of the 75 % / 90 % thresholds (CPU, RAM).
   function setColour(el, pct, cls) {
@@ -32,6 +36,37 @@
   function setText(id, value) {
     var el = document.getElementById(id);
     if (el) { el.textContent = value; }
+  }
+
+  // The tiles of the Overview layout: CPU, Memory, Disk / and Network, at the top of the page. A tile gives its value
+  // and its level, in words in its badge: OK, Watch or Critical with the thresholds of the cards (CPU and memory: 75 %
+  // and 90 %; the disk: its alert level, the one of the banner), Live for the network. Its colour follows data-level
+  // (static/css/overview.css); its small graph is drawn by static/js/live_graphs.js. Classic has no tile: tile()
+  // returns false.
+  var BADGES = { ok: 'OK', warning: 'Watch', critical: 'Critical', unavailable: 'Unavailable', live: 'Live' };
+
+  function tile(name, lvl, value) {
+    var el = document.getElementById('tile-' + name);
+    if (!el) { return false; }
+    if (value !== undefined) { setText('tile-' + name + '-value', value); }
+    setText('tile-' + name + '-badge', BADGES[lvl]);
+    if (el.getAttribute('data-level') !== lvl) { el.setAttribute('data-level', lvl); }
+    return true;
+  }
+
+  function oneDecimal(text) { var v = Number(text); return isFinite(v) ? v.toFixed(1) : '--'; }
+
+  function rootTile(d) {  // the disk mounted on /, as in the Disk Info card
+    var x = d['/'];
+    if (!x || x.unavailable) {
+      if (tile('disk', 'unavailable', '--')) { setText('tile-disk-info', 'Unavailable'); }
+      return;
+    }
+    var lvl = x.alert === 'critical' || x.alert === 'warning' ? x.alert : 'ok';
+    // truncated, as in the banner: "90%" never shows below the threshold of 90
+    if (tile('disk', lvl, Math.trunc(Number(x.perutil) || 0) + '%')) {
+      setText('tile-disk-info', x.diskfree + ' free of ' + x.disktotal);
+    }
   }
 
   function perCore(values) {
@@ -80,6 +115,7 @@
     setText('cpusystem', c.system);
     setText('cpuiowait', c.iowait);
     setText('cpusteal', c.steal);
+    if (tile('cpu', level(Number(c.used)), oneDecimal(c.used) + '%')) { setText('tile-cpu-cores', c.cores); }
   }
 
   function ram(r) {
@@ -90,6 +126,9 @@
     setBar(document.getElementById('ramprogress'), r.perutil);
     setColour(document.getElementById('ramindicator'), Number(r.perutil));
     var ri = document.getElementById('ramindicator'); if (ri) { ri.title = 'RAM : ' + r.perutil + ' %'; }
+    if (tile('ram', level(Number(r.perutil)), oneDecimal(r.perutil) + '%')) {
+      setText('tile-ram-info', r.ramused + ' of ' + r.ramtotal);
+    }
   }
 
   function setDiskState(m, unavailable) {  // "UNAVAILABLE" badge above the disk's name, % line hidden
@@ -227,8 +266,14 @@
     socket.on('live', function (d) {
       if (d.cpu) { cpu(d.cpu); }
       if (d.ram) { ram(d.ram); }
-      if (d.disks) { disks(d.disks); alerts(d.disks); }
+      if (d.disks) { disks(d.disks); alerts(d.disks); rootTile(d.disks); }
     });
+    // The Overview's network tile (the admin only); its speeds are written with its small graph, by live_graphs.js.
+    if (document.getElementById('tile-net')) {
+      socket.on('speed', function (s) {
+        if (s && tile('net', 'live')) { setText('tile-net-interface', s.interface); }
+      });
+    }
     // The live graphs (static/js/live_graphs.js) listen on this same connection, after the cards.
     if (window.LiveGraphs) { window.LiveGraphs.attach(socket); }
   });
