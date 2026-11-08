@@ -74,6 +74,18 @@ try:  # Logs buttons of Service Info (core/service_logs.py, see the README): a p
 except Exception:
     app.config["SERVICE_LOGS"] = False
     app.logger.exception("Service logs disabled: they could not be loaded")
+try:  # Panel sign-ins, for the admin's Overview (core/signins.py, see the README): must not stop the panel either
+    from core import signins
+    signin_history = signins.register(app, htpasswd)
+except Exception:
+    signin_history, app.config["SIGNINS_CARD"] = None, False
+    app.logger.exception("Panel sign-ins disabled: they could not be loaded")
+try:  # Top processes, in the Details of Overview (core/processes.py, see the README): a problem there must not stop it
+    from core import processes
+    processes.register(app, htpasswd)
+except Exception:
+    app.config["TOP_PROCESSES"] = False
+    app.logger.exception("Top processes disabled: they could not be loaded")
 
 # Layout of the dashboard chosen by each account, Classic or Overview (see the README): kept next to swizzin.cfg.
 layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))
@@ -479,6 +491,8 @@ def logout(user):
     return flask.render_template('logout.html')
 
 if __name__ == '__main__':
+    if signin_history is not None:  # on disk once the panel serves: never when it is imported (the tests do)
+        signin_history.keep_in(os.path.join(app.root_path, signins.FILE))
     socketio.run(app, host=app.config['HOST'], port=app.config['PORT'])
 
     #app.run(debug=True,host='0.0.0.0', port=8333)

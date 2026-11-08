@@ -1,0 +1,27 @@
+/* Top processes (static/js/processes.js, templates/overview/processes.html): a section of the Details of Overview, on
+   the Darkly theme of the panel, in the colours of static/css/overview.css. Two small tables; a long name or account
+   wraps rather than push the page sideways. The bars only repeat the number next to them (hidden from screen
+   readers), as a share of their grey track, the whole processor or the whole memory: on a phone, they give their
+   room to the numbers. */
+.ov-processes-about { margin-bottom: 0.5rem; font-size: 0.8125rem; color: #b0b0b0; }
+.ov-processes-message { margin-bottom: 0.5rem; font-size: 0.875rem; overflow-wrap: anywhere; }
+.ov-processes-about:empty, .ov-processes-message:empty { display: none; }
+.ov-processes-title { margin: 0.75rem 0 0.25rem; font-size: 0.9375rem; font-weight: 700; }
+.ov-processes-table { margin-bottom: 0.25rem; font-size: 0.875rem; }
+.ov-processes-table th { font-size: 0.75rem; font-weight: 400; color: #b0b0b0; text-transform: uppercase;
+  letter-spacing: 1px; border-top: 0; }
+.ov-processes-table th, .ov-processes-table td { padding: 0.3rem 0.5rem; vertical-align: middle; }
+.ov-processes-name, .ov-processes-user { overflow-wrap: anywhere; }
+.ov-processes-user { color: #b0b0b0; }
+.ov-processes-number { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-processes-number > span { display: inline-block; white-space: nowrap; }
+.ov-processes-share { margin-left: 0.4em; font-size: 0.8125rem; color: #b0b0b0; }
+.ov-processes-bar { width: 5rem; }
+.ov-processes-track { display: block; height: 6px; border-radius: 3px; background-color: #444; overflow: hidden; }
+.ov-processes-fill { display: block; height: 100%; background-color: #5dade2; }
+.ov-processes-empty { margin-bottom: 0.25rem; font-size: 0.875rem; color: #b0b0b0; }
+
+@media (max-width: 575.98px) {
+  .ov-processes-bar { display: none; }
+  .ov-processes-table th, .ov-processes-table td { padding: 0.25rem 0.3rem; }
+}

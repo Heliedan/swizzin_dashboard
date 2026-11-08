@@ -137,6 +137,25 @@
   color: #b0b0b0; text-shadow: none; font-variant-numeric: tabular-nums; }
 .ov-tile .live-graph-has-bottom .live-graph-bottom { top: auto; bottom: 0; }
 
+/* Panel sign-ins (static/js/signins.js, the admin only): two short tables in a section of Details. An address stays
+   on its line, unless it is a long IPv6 one (ov-signins-long): that one breaks anywhere rather than widen the table,
+   for a phone. */
+.ov-signins-message { margin-bottom: 0.5rem; font-size: 0.875rem; }
+.ov-signins-title { margin: 0 0 0.375rem; font-size: 0.9375rem; font-weight: 700; }
+.ov-signins-title ~ .ov-signins-title { margin-top: 1rem; }
+.ov-signins-table { margin-bottom: 0.25rem; font-size: 0.8125rem; }
+.ov-signins-table th, .ov-signins-table td { padding: 4px 8px 4px 0; vertical-align: top; }
+.ov-signins-when { white-space: nowrap; }
+.ov-signins-address { white-space: nowrap; }
+.ov-signins-address.ov-signins-long { white-space: normal; word-break: break-all; overflow-wrap: anywhere; }
+.ov-signins-quiet { color: #b0b0b0; font-style: italic; }
+.ov-signins-you, .ov-signins-blocked { display: block; font-size: 0.75rem; word-break: normal; }
+.ov-signins-you { color: #5dade2; }
+.ov-signins-blocked { color: #f39c12; font-weight: 700; }
+.ov-signins-note { margin: 0; font-size: 0.8125rem; color: #b0b0b0; }
+.ov-signins-note:empty { display: none; }
+.ov-signins-about { margin: 1rem 0 0; font-size: 0.75rem; color: #b0b0b0; }
+
 /* Customize (static/js/arrange.js): the button at the right end of the heading of At a glance, after the pills when
    they show, and the editor under that heading. One list per zone, the zones side by side as the width allows; each
    line, the block's name then its buttons, which go under it on a narrow screen. The buttons are 44 px at least on
@@ -175,3 +194,4 @@
    of the row, and the panel of the logs stays under both. */
 .ov-row > .card.ov-network { flex: 2 1 560px; }
 .ov-row > .ov-logs { order: 1; }
+

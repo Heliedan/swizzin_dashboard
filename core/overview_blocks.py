@@ -30,9 +30,13 @@ BLOCKS = [
      "script": "js/service_logs.js"},
     {"id": "cpu", "zone": "left", "template": "overview/cpu.html", "label": "CPU Info"},
     {"id": "ram", "zone": "left", "template": "overview/ram.html", "label": "RAM Info"},
+    {"id": "processes", "zone": "left", "template": "overview/processes.html", "label": "Top processes",
+     "script": "js/processes.js", "stylesheet": "css/processes.css"},
     {"id": "disks", "zone": "right", "template": "overview/disks.html", "label": "Disk Info"},
     {"id": "quota", "zone": "right", "template": "overview/quota.html", "label": "Disk Quota Info"},
     {"id": "network", "zone": "right", "template": "overview/network.html", "label": "Network Info"},
+    {"id": "signins", "zone": "right", "template": "overview/signins.html", "label": "Panel sign-ins",
+     "script": "js/signins.js"},
 ]
 
 
