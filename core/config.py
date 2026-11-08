@@ -18,6 +18,7 @@ class Config:
     NETWORK_TOTALS = False
     DISK_UNITS = "iec"
     DASHBOARD_LAYOUT = "classic"  # or "overview": the layout of the accounts that chose none (core/layouts.py)
+    UPDATES_CHECK = True  # Overview: count the pending updates of apt for the admin (core/system_status.py)
 
     NETWORK_INFO_CUTOFF = "YYYY-MM-DD"
     NETWORK_INFO_TOP = True

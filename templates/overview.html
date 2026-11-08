@@ -26,6 +26,7 @@
     <div class="ov-heading">
       <h2 class="ov-title" id="ov-glance">At a glance</h2>
       <span class="ov-hint">Live, with the last 5 minutes</span>
+      {%- for block in overview_blocks.zone('glance') %}{% include block.template %}{% endfor %}
     </div>
     <div class="ov-tiles">
       {%- for block in overview_blocks.zone('tiles') %}{% include block.template %}{% endfor %}

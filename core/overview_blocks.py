@@ -2,6 +2,7 @@
 
 Each block has its template in templates/overview/, which keeps the conditions under which it shows (the admin only,
 no disk quota...): an account that may not see a block gets nothing from it. Each block shows in one zone of the page:
+  glance       the heading of At a glance, after its title (the admin's pills: reboot, updates);
   tiles        At a glance, the row of tiles at the top;
   row          the row under the tiles: the bandwidth graph and Service Info;
   left, right  the two columns of Details, where each block is a section: a <details> element whose data-section is
@@ -10,12 +11,14 @@ A new block is one more line here, with its script or its stylesheet if it has o
 loads those of the Overview layout from here, after the layout's own (SCRIPTS, STYLESHEETS). The id stays the same
 for good; the label is the block's name for people. tests/test_overview_blocks.py checks this list."""
 
-ZONES = ("tiles", "row", "left", "right")
+ZONES = ("glance", "tiles", "row", "left", "right")
 
 STYLESHEETS = ["css/overview.css"]
 SCRIPTS = ["js/overview.js"]
 
 BLOCKS = [
+    {"id": "system-status", "zone": "glance", "template": "overview/system_status.html", "label": "Reboot and updates",
+     "script": "js/system_status.js"},
     {"id": "tile-cpu", "zone": "tiles", "template": "overview/tile_cpu.html", "label": "CPU"},
     {"id": "tile-ram", "zone": "tiles", "template": "overview/tile_ram.html", "label": "Memory"},
     {"id": "tile-disk", "zone": "tiles", "template": "overview/tile_disk.html", "label": "Disk /"},
