@@ -1,0 +1,24 @@
+{# Block "signins" of core/overview_blocks.py: Panel sign-ins, a section of Details, for the admin only
+   (core/signins.py). static/js/signins.js fills its two lists from /signins when the section is opened, then every
+   minute while it stays open. #}
+{%- if admin and config.SIGNINS_CARD %}
+        <details class="card ov-section" data-section="signins"><summary class="card-header">Panel sign-ins</summary>
+          <div class="card border-dark ov-signins" id="ov-signins" data-url="{{ url_for('signins.recent') }}" data-logout="{{ url_for('logout') }}">
+            <div class="card-body">
+              <p class="ov-signins-message" id="ov-signins-message" role="status">Loading…</p>
+              <div id="ov-signins-lists" hidden>
+              {%- for list, title, columns in (('ok', 'Recent sign-ins', ('When', 'Account', 'Address')),
+                                               ('failed', 'Failed attempts', ('When', 'Account', 'Address', 'Tries'))) %}
+              <h3 class="ov-signins-title" id="ov-signins-{{ list }}-title">{{ title }}</h3>
+              <table class="table table-sm table-dark table-borderless ov-signins-table" id="ov-signins-{{ list }}-table" aria-labelledby="ov-signins-{{ list }}-title" hidden>
+                <thead class="table-active"><tr>{% for column in columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+                <tbody id="ov-signins-{{ list }}"></tbody>
+              </table>
+              <p class="ov-signins-note" id="ov-signins-{{ list }}-note"></p>
+              {%- endfor %}
+              <p class="ov-signins-about" id="ov-signins-about"></p>
+              </div>
+            </div>
+          </div>
+        </details>
+{%- endif %}

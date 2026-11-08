@@ -106,6 +106,7 @@ class HtPasswdAuth:
         """Boiler plate extension init with log_level being declared"""
         self.users = HtpasswdFile()
         self.failed_logins = FailedLogins(0, 0, 0)
+        self.signin_history = None  # told of each login checked, once core/signins.py sets it
         self.app = app
         if app is not None:
             self.init_app(app)
@@ -235,7 +236,26 @@ class HtPasswdAuth:
         if credentials and not is_valid and self.failed_logins.failed(address, credentials):
             log.warning('Too many failed logins from %s: refused for %d minutes',
                         address, math.ceil(self.failed_logins.block_time / 60))
+        self.tell_signin_history(address, credentials, is_valid)
         return (is_valid, user)
+
+    def tell_signin_history(self, address, credentials, is_valid):
+        """Tell the history of sign-ins (core/signins.py), when there is one, of a login whose password was checked:
+        the account when it exists (an unknown name may be a password typed in the wrong box), the address, the result,
+        and for how long this failure got the address refused. Never the password. Nothing for a request without
+        credentials, or refused before its password was checked. It never changes the answer: a problem is logged."""
+        history = self.signin_history
+        if history is None or not credentials:
+            return
+        try:
+            name = credentials[1]
+            known = isinstance(name, str) and (bool(is_valid) or self.users.get_hash(name) is not None)
+            # Refused right after this failure: it is the one that got the address blocked (a blocked address is
+            # refused before its password is checked, so it never comes here).
+            blocked = 0 if is_valid else self.failed_logins.retry_after(address)
+            history.checked(name if known else None, address, bool(is_valid), blocked)
+        except Exception:  # pylint: disable=broad-except
+            log.exception('Panel sign-ins: this login could not be noted')
 
     def required(self, func):
         """
