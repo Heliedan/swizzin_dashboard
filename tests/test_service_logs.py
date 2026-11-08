@@ -98,7 +98,10 @@ class LogsTest(unittest.TestCase):
 
     def setUp(self):
         self.journal(output="".join(line + "\n" for line in LINES))
-        self.active = int((time.monotonic() - 3600) * 1e6)  # an hour ago
+        # started an hour ago, or half the time since the boot on a machine started less than two hours ago (as the
+        # CI's): the monotonic clock starts at the boot, and a service cannot have started before it
+        self.ago = min(3600, time.monotonic() / 2)
+        self.active = int((time.monotonic() - self.ago) * 1e6)
         self.systemctl([line.format(active=self.active) for line in SHOW])
         for name in ("calls.log", "systemctl.log"):
             try:
@@ -153,7 +156,7 @@ class Route(LogsTest):
         self.assertEqual(data["unit"], "sonarr.service")
         self.assertEqual((data["journal"], data["lines"], data["message"]), ("ok", LINES, None))
         since = data["state"].pop("since")
-        self.assertLessEqual(abs(since - (time.time() - 3600)), 2)
+        self.assertLessEqual(abs(since - (time.time() - self.ago)), 2)
         self.assertEqual(data["state"], {"load": "loaded", "active": "active", "sub": "running", "result": "success",
                                          "restarts": 4})
         self.assertEqual(self.journal_calls(), [["--unit=sonarr.service", "--lines=100", "--output=short-iso",
@@ -221,13 +224,14 @@ class Route(LogsTest):
 
 class State(LogsTest):
     def test_stopped_failed_and_unknown(self):
-        inactive = int((time.monotonic() - 120) * 1e6)
+        stopped = self.ago / 4  # after it started
+        inactive = int((time.monotonic() - stopped) * 1e6)
         self.systemctl(["ActiveState=failed", "SubState=failed", "Result=exit-code", "NRestarts=5", "LoadState=loaded",
                         "ActiveEnterTimestampMonotonic=%d" % self.active,
                         "InactiveEnterTimestampMonotonic=%d" % inactive])
         state = self.logs()["state"]
         self.assertEqual((state["active"], state["result"], state["restarts"]), ("failed", "exit-code", 5))
-        self.assertLessEqual(abs(state["since"] - (time.time() - 120)), 2)  # when it stopped, not when it started
+        self.assertLessEqual(abs(state["since"] - (time.time() - stopped)), 2)  # when it stopped, not when it started
         self.systemctl(["LoadState=not-found", "ActiveState=inactive", "SubState=dead", "Result=success",
                         "NRestarts=0", "ActiveEnterTimestampMonotonic=0", "InactiveEnterTimestampMonotonic=0"])
         self.assertEqual(self.logs()["state"], {"load": "not-found", "active": "inactive", "sub": "dead",
