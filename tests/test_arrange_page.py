@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The panel set up by the tests of the layouts: a throwaway htpasswd file (the admin "tester", and "friend") and
 # swizzin.cfg, removed at the end.
 from test_layouts_page import ROOT, Ids, LayoutTest, auth, swizzin  # noqa: E402
-from core import overview_blocks  # noqa: E402
+from core import layouts, overview_blocks  # noqa: E402
 from core.middleware import PrefixMiddleware  # noqa: E402
 
 ARRANGED = {"order": ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "disks", "cpu", "ram",
@@ -55,11 +55,42 @@ def places(page):
     return out
 
 
-def details(page):
-    """places() of Details only: its two columns and their sections."""
-    found = places(page)
-    first = next(i for i, x in enumerate(found) if x.startswith("ov-column"))
-    return found[first:]
+def layout(page):
+    """The page by zone, as the panel rendered it: the ids of the blocks of each zone in their order (the sections by
+    their data-section, the tiles by their id, the pills and the two cards of the row by what they are); "hidden", the
+    blocks in an element with the hidden attribute, in the order of the page; "hidden columns", the columns hidden."""
+    out = {zone: [] for zone in overview_blocks.ZONES}
+    out.update({"hidden": [], "hidden columns": []})
+    columns, zone = iter(("left", "right")), None
+    for item in places(page):
+        if item.startswith("ov-column"):
+            zone = next(columns)
+            if item.endswith(" hidden"):
+                out["hidden columns"].append(zone)
+        elif item.startswith("hidden:"):
+            out["hidden"].append(item[len("hidden:"):])
+        elif zone:
+            out[zone].append(item)
+        elif item == "ov-status":
+            out["glance"].append("system-status")
+        elif item.startswith("tile-"):
+            out["tiles"].append(item)
+        else:
+            out["row"].append({"ov-network": "bandwidth", "Service Info": "services"}[item])
+    return out
+
+
+def seen(page):
+    """The blocks that layout() finds on a page."""
+    return {i for zone in overview_blocks.ZONES for i in layout(page)[zone]}
+
+
+def unlisted(zone, arrangement, shown):
+    """The blocks of `zone` that `arrangement` does not list, among `shown`, in the order of core/overview_blocks.py:
+    the page puts them after those it lists (the blocks added to the list since it was made, say)."""
+    other = arrangement.get("other_column", [])
+    return [b["id"] for b in overview_blocks.BLOCKS if b["id"] in shown and b["id"] not in arrangement.get("order", [])
+            and (layouts.OTHER_COLUMN.get(b["zone"], b["zone"]) if b["id"] in other else b["zone"]) == zone]
 
 
 class ArrangeTest(LayoutTest):
@@ -182,11 +213,18 @@ class Page(ArrangeTest):
     """The page of an account that arranged Overview: in its order, rendered by the panel."""
 
     def test_in_the_order_of_the_account(self):
-        page = self.overview("tester", ARRANGED, quota=True)
-        self.assertEqual(places(page),
-                         ["ov-status", "tile-ram", "tile-cpu", "tile-net", "hidden:tile-disk", "tile-disk",
-                          "Service Info", "ov-network", "ov-column", "disks", "cpu", "hidden:ram", "ram", "ov-column",
-                          "quota", "network"])
+        """The blocks it lists first, in its order, hidden or in the other column as it says; then, in each zone, those
+        it does not list, in the order of core/overview_blocks.py (Top processes and Panel sign-ins, added since)."""
+        shown = seen(self.overview("tester", quota=True))
+        found = layout(self.overview("tester", ARRANGED, quota=True))
+        listed = {"glance": [], "tiles": ["tile-ram", "tile-cpu", "tile-net", "tile-disk"],
+                  "row": ["services", "bandwidth"], "left": ["disks", "cpu", "ram"], "right": ["quota", "network"]}
+        for zone, ids in listed.items():
+            with self.subTest(zone):
+                self.assertEqual(found[zone], ids + unlisted(zone, ARRANGED, shown))
+        self.assertEqual((found["hidden"], found["hidden columns"]), (["tile-disk", "ram"], []))
+        self.assertIn("processes", found["left"][3:])
+        self.assertIn("signins", found["right"][2:])
 
     def test_a_hidden_block_stays_in_the_page(self):
         """In an element with the hidden attribute: the scripts that fill it or read it keep working, and nothing more
@@ -202,52 +240,85 @@ class Page(ArrangeTest):
         self.assertEqual(page.count("ov-hidden-block"), 5)
 
     def test_a_column_with_nothing_to_show_is_hidden(self):
-        """The other one then takes the whole width of Details; its hidden sections stay in the page."""
-        page = self.overview("tester", {"other_column": ["cpu", "ram"]})  # not in an order: that of the list
-        self.assertEqual(details(page), ["ov-column hidden", "ov-column", "cpu", "ram", "disks", "network"])
-        page = self.overview("tester", {"hidden": ["disks", "network"]})
-        self.assertEqual(details(page), ["ov-column", "cpu", "ram", "ov-column hidden", "hidden:disks", "disks",
-                                         "hidden:network", "network"])
-        self.assertEqual(details(self.overview("tester", {"reset": True})),
-                         ["ov-column", "cpu", "ram", "ov-column", "disks", "network"])
+        """The other one then takes the whole width of Details; its hidden sections stay in the page. Whatever the
+        sections of each column are: all of one column go to the other, or all of one are hidden."""
+        shown = seen(self.overview("tester"))
+        left = [b["id"] for b in overview_blocks.zone("left")]
+        right = [b["id"] for b in overview_blocks.zone("right")]
+        on_left, on_right = [i for i in left if i in shown], [i for i in right if i in shown]
+        self.assertTrue(on_left and on_right)
+        found = layout(self.overview("tester", {"other_column": left}))  # not in an order: that of the list
+        self.assertEqual((found["hidden columns"], found["left"]), (["left"], []))
+        self.assertEqual(found["right"], [b["id"] for b in overview_blocks.BLOCKS if b["id"] in on_left + on_right])
+        found = layout(self.overview("tester", {"hidden": right}))
+        self.assertEqual((found["hidden columns"], found["left"], found["right"], found["hidden"]),
+                         (["right"], on_left, on_right, on_right))
+        found = layout(self.overview("tester", {"reset": True}))
+        self.assertEqual((found["hidden columns"], found["left"], found["right"], found["hidden"]),
+                         ([], on_left, on_right, []))
 
     def test_the_blocks_of_the_admin_never_for_another_account(self):
         """Whatever its arrangement says: listed first, hidden, or in another column, they are not rendered at all,
-        not even hidden, and the editor does not list them."""
-        friend = {"order": ADMIN_ONLY + ["network", "tile-ram"], "hidden": ADMIN_ONLY + ["network"],
-                  "other_column": ["network"]}
+        not even hidden, and the editor does not list them. They are the blocks the admin's page has and this
+        account's has not: the pills, the Network tile and graph, Network Info (not a shared server), Panel sign-ins."""
+        admin = [b["id"] for b in editor(self.overview("tester"))["blocks"]]
+        plain = editor(self.overview("friend"))
+        own = [b["id"] for b in plain["blocks"]]
+        admin_only = [i for i in admin if i not in own]
+        for block in ADMIN_ONLY + ["network", "signins"]:
+            self.assertIn(block, admin_only)
+        self.assertIn("processes", own)  # their own programs
+        zone = {b["id"]: b["zone"] for b in overview_blocks.BLOCKS}
+        friend = {"order": admin_only + ["tile-ram"], "hidden": admin_only,
+                  "other_column": [i for i in admin_only if zone[i] in layouts.OTHER_COLUMN]}
         page = self.overview("friend", friend)
         ids = Ids(page).ids
         for element in ("ov-status", "tile-net", "net-spark", "ov-network", "net-graph", "ov-hour-rx", "top10",
-                        "current_rx"):
+                        "current_rx", "ov-signins"):
             self.assertNotIn(element, ids)
-        self.assertNotIn('data-section="network"', page)
+        for block in admin_only:
+            self.assertNotIn('data-section="%s"' % block, page)
+            self.assertNotIn('data-block="%s"' % block, page)
         self.assertNotIn("ov-hidden-block", page)
-        self.assertEqual(places(page), ["tile-ram", "tile-cpu", "tile-disk", "Service Info", "ov-column", "cpu",
-                                        "ram", "ov-column", "disks"])
-        self.assertEqual([b["id"] for b in editor(page)["blocks"]],
-                         ["tile-ram", "tile-cpu", "tile-disk", "services", "cpu", "ram", "disks"])
-        self.assertEqual(editor(page)["order"], ["tile-cpu", "tile-ram", "tile-disk", "services", "cpu", "ram",
-                                                 "disks"])
+        self.assertEqual(layout(page)["tiles"][0], "tile-ram")
+        data = editor(page)
+        self.assertEqual(sorted(b["id"] for b in data["blocks"]), sorted(own))
+        self.assertEqual(data["blocks"][0]["id"], "tile-ram")
+        self.assertEqual(data["order"], plain["order"])
 
     def test_the_editor_lists_the_blocks_of_the_page(self):
+        """Each block of the page, with its label, its zone and its zone by default, in the order of the page; those
+        added to the list since Customize too (Top processes, Panel sign-ins)."""
         page = self.overview("tester", quota=True)
         data = editor(page)
-        shown = ["system-status", "tile-cpu", "tile-ram", "tile-disk", "tile-net", "bandwidth", "services", "cpu",
-                 "ram", "disks", "quota", "network"]
-        labels = {block["id"]: block["label"] for block in overview_blocks.BLOCKS}
-        homes = {block["id"]: block["zone"] for block in overview_blocks.BLOCKS}
-        self.assertEqual(data["blocks"], [{"id": i, "label": labels[i], "zone": homes[i], "home": homes[i],
-                                           "hidden": False} for i in shown])
-        self.assertEqual(data["order"], [block["id"] for block in overview_blocks.BLOCKS])
+        ids = [b["id"] for b in data["blocks"]]
+        for block in ("system-status", "tile-cpu", "tile-ram", "tile-disk", "tile-net", "bandwidth", "services", "cpu",
+                      "ram", "disks", "quota", "network", "processes", "signins"):
+            self.assertIn(block, ids)
+        registry = {block["id"]: block for block in overview_blocks.BLOCKS}
+        self.assertEqual(ids, [b["id"] for z in overview_blocks.ZONES for b in overview_blocks.zone(z)
+                               if b["id"] in ids])
+        self.assertEqual(data["blocks"], [{"id": i, "label": registry[i]["label"], "zone": registry[i]["zone"],
+                                           "home": registry[i]["zone"], "hidden": False} for i in ids])
+        self.assertEqual(data["order"], [block["id"] for block in overview_blocks.BLOCKS if block["id"] in ids])
         self.assertEqual(data["zones"], list(overview_blocks.ZONES))
         self.assertEqual((data["url"], data["logout"]), ("/layout/arrange", "/logout"))
-        data = editor(self.overview("tester", ARRANGED, quota=True))
-        self.assertEqual([(b["id"], b["zone"], b["hidden"]) for b in data["blocks"]][5:],
-                         [("services", "row", False), ("bandwidth", "row", False), ("disks", "left", False),
-                          ("cpu", "left", False), ("ram", "left", True), ("quota", "right", False),
-                          ("network", "right", False)])
-        self.assertEqual([b["home"] for b in data["blocks"]][7], "right")  # disks, at home on the right
+        page = self.overview("tester", ARRANGED, quota=True)
+        data, found = editor(page), layout(page)
+        where = {b["id"]: (b["zone"], b["home"], b["hidden"]) for b in data["blocks"]}
+        for block, expected in (("services", ("row", "row", False)), ("bandwidth", ("row", "row", False)),
+                                ("disks", ("left", "right", False)), ("cpu", ("left", "left", False)),
+                                ("ram", ("left", "left", True)), ("quota", ("right", "right", False)),
+                                ("network", ("right", "right", False)), ("processes", ("left", "left", False)),
+                                ("signins", ("right", "right", False))):
+            self.assertEqual(where[block], expected, block)
+        known = seen(page)
+        for zone in overview_blocks.ZONES:  # the editor's order is the page's (for the blocks layout() can tell)
+            self.assertEqual([b["id"] for b in data["blocks"] if b["zone"] == zone and b["id"] in known], found[zone],
+                             zone)
+        ids = [b["id"] for b in editor(self.overview("friend"))["blocks"]]
+        self.assertIn("processes", ids)
+        self.assertNotIn("signins", ids)
 
     def test_the_button_and_its_script_on_overview_only(self):
         """Hidden until static/js/arrange.js shows it: without JavaScript, the page has no button that does nothing."""
@@ -276,26 +347,28 @@ class Page(ArrangeTest):
     def test_a_block_added_to_the_list_can_be_arranged(self):
         """A new block is one more line in core/overview_blocks.py and its template: the editor lists it, and the page
         puts it where the account says, hidden or not, with nothing else to write."""
+        plain = layout(self.overview("tester"))
         loader = swizzin.app.jinja_env.loader
         with mock.patch.object(overview_blocks, "BLOCKS", overview_blocks.BLOCKS + [EXTRA]), \
                 mock.patch.object(swizzin.app.jinja_env, "loader",
                                   jinja2.ChoiceLoader([jinja2.DictLoader({EXTRA["template"]: EXTRA_HTML}), loader])):
             page = self.overview("tester")
-            self.assertEqual(details(page), ["ov-column", "cpu", "ram", "ov-column", "disks", "network", "extra"])
+            found = layout(page)
+            self.assertEqual((found["left"], found["right"]), (plain["left"], plain["right"] + ["extra"]))
             self.assertEqual(editor(page)["blocks"][-1],
                              {"id": "extra", "label": "Extra <b>block</b>", "zone": "right", "home": "right",
                               "hidden": False})
             self.assertNotIn("<b>block</b>", page)  # escaped in the attribute; the editor writes it as text
             page = self.overview("tester", {"order": ["extra", "cpu"], "hidden": ["extra"], "other_column": ["extra"]})
-            self.assertEqual(details(page), ["ov-column", "hidden:extra", "extra", "cpu", "ram", "ov-column", "disks",
-                                             "network"])
+            found = layout(page)
+            self.assertEqual(found["left"], ["extra", "cpu"] + [i for i in plain["left"] if i != "cpu"])
+            self.assertEqual((found["right"], found["hidden"]), (plain["right"], ["extra"]))
             self.assertIn("extra-text", Ids(page).ids)
         swizzin.app.jinja_env.cache.clear()  # the page without it again
         page = self.page("tester")  # once the block is gone, its id is left out
         self.assertNotIn('data-section="extra"', page)
         self.assertNotIn("extra-text", page)
-        self.assertEqual(details(page), ["ov-column", "cpu", "ram", "ov-column", "disks", "network"])
-
+        self.assertEqual(layout(page), plain)
 
 if __name__ == "__main__":
     try:
