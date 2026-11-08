@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The page, the fake DOM and its runner are those of the disk banner's tests. Importing them points the panel to a
 # throwaway htpasswd file (the admin "tester", and "friend") and writes swizzin.cfg, removed at the end.
 from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin  # noqa: E402
-from test_live_graphs_js import T0, line, speed  # noqa: E402
+from test_live_graphs_js import T0, find, line, speed  # noqa: E402
 from fake_vnstat import EMPTY, FakeVnstat, vnstat_json  # noqa: E402
 
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:tester").decode()}
@@ -215,7 +215,8 @@ class Graphs(OverviewTest):
                            ("net-spark", "tx"), ("cpu-graph", "used"), ("net-graph", "rx")):
             with self.subTest(graph=graph, key=key):
                 self.assertEqual([len(sub) for sub in line(snap, graph, key)], [301])
-        # The same points as the CPU Info card's graph; the memory at 50 %, / at 41.91 %, of 0 to 100 %.
+        # The CPU from 0 to 99 %: the tile's scale is 0 to 100 % too, the same points as the CPU Info card's graph.
+        # The memory at 50 %: the middle of its scale (45 to 55 %). / at 41.91 %, of 0 to 100 %.
         self.assertEqual(line(snap, "cpu-spark", "used"), line(snap, "cpu-graph", "used"))
         self.assertEqual({y for x, y in line(snap, "ram-spark", "used")[0]}, {50.0})
         self.assertEqual({y for x, y in line(snap, "disk-spark", "used")[0]}, {58.1})
@@ -243,6 +244,132 @@ class Graphs(OverviewTest):
                              ("disk-spark", "Space used on / over the last 5 minutes"),
                              ("net-spark", "Download and upload speed over the last 5 minutes")):
             self.assertIn(f'id="{graph}" role="img" aria-label="{label}"', page)
+
+
+def marks(snap, graph):
+    """The labels of a graph's scale that the page has, top first: (top, bottom) for the CPU and Memory tiles."""
+    text = snap["graphs"][graph]["text"]
+    return tuple(text[f"{graph}-{mark}"] for mark in ("top", "middle", "bottom") if f"{graph}-{mark}" in text)
+
+
+def ys(snap, graph):
+    """The heights of the points of a graph's line, every piece together (0: the top of the scale, 100: its bottom)."""
+    return [y for sub in line(snap, graph, "used") for x, y in sub]
+
+
+class TileScales(OverviewTest):
+    """The scale of the CPU and Memory tiles zooms on the readings of the window: from a multiple of 5 % at or below
+    the lowest to one at or above the highest, 10 points at least, within 0 to 100 %; their top and bottom labelled."""
+
+    def readings(self, seconds, cpu=lambda s: "10.0", ram=lambda s: "50.00"):
+        """One "live" event at each of these seconds, in one step. cpu, ram: the text sent, as a function of the
+        second."""
+        return {"batch": [at(s, "live", live(cpu=cpu(s), ram=ram(s))) for s in seconds]}
+
+    def test_the_page_labels_their_top_and_bottom(self):
+        """#id-top and #id-bottom, a grid line at each; the other graphs keep #id-top and #id-middle, as before."""
+        with mock.patch.object(swizzin.layout_choices, "get", return_value="overview"):
+            tree = Tree()
+            tree.feed(dashboard("tester", ["/"], False))
+        for graph in ("cpu-spark", "ram-spark", "disk-spark", "net-spark", "cpu-graph", "net-graph"):
+            with self.subTest(graph):
+                plot = find(tree.root, graph)
+                zoomed = graph in ("cpu-spark", "ram-spark")
+                self.assertEqual("live-graph-has-bottom" in plot["attrs"]["class"].split(), zoomed)
+                self.assertIsNotNone(find(plot, f"{graph}-top"))
+                self.assertEqual(find(plot, f"{graph}-bottom") is not None, zoomed)
+                self.assertEqual(find(plot, f"{graph}-middle") is not None, not zoomed)
+                svg = [c for c in plot["children"] if c.get("tag") == "svg"][0]
+                grid = [c["attrs"]["y1"] for c in svg["children"] if c.get("tag") == "line"]
+                self.assertEqual(grid, ["0", "100"] if zoomed else ["0", "50"])
+
+    def test_a_steady_memory_gets_10_points_around_it(self):
+        """19.1 to 19.3 %: 15 to 25 %, the readings in the middle; the line stays almost flat (2 % of the height)."""
+        snap = self.run_page([self.readings(range(60), ram=lambda s: ("19.10", "19.20", "19.30")[s % 3])])[1]
+        self.assertEqual(marks(snap, "ram-spark"), ("25%", "15%"))
+        self.assertEqual(set(ys(snap, "ram-spark")), {57.0, 58.0, 59.0})
+
+    def test_a_wide_range_fills_the_height(self):
+        cases = [(("5.0", "40.0", "22.5"), ("40%", "5%"), [100.0, 0.0, 50.0]),
+                 (("7.0", "83.0", "45.0"), ("85%", "5%"), [97.5, 2.5, 50.0]),
+                 (("3.0", "97.0"), ("100%", "0%"), [97.0, 3.0]),
+                 (("12.0", "21.0"), ("25%", "10%"), [86.7, 26.7])]
+        for values, scale, heights in cases:
+            with self.subTest(values):
+                snap = self.run_page([self.readings(range(len(values)), cpu=lambda s: values[s])])[1]
+                self.assertEqual(marks(snap, "cpu-spark"), scale)
+                self.assertEqual(ys(snap, "cpu-spark"), heights)
+
+    def test_near_0_and_near_100(self):
+        """10 points at least, kept within 0 to 100 %."""
+        cases = [(("0.0", "2.0"), ("10%", "0%"), [100.0, 80.0]), (("0.0", "0.0"), ("10%", "0%"), [100.0, 100.0]),
+                 (("4.0", "6.0"), ("10%", "0%"), [60.0, 40.0]), (("97.0", "100.0"), ("100%", "90%"), [30.0, 0.0]),
+                 (("100.0", "100.0"), ("100%", "90%"), [0.0, 0.0]), (("91.0", "94.0"), ("100%", "90%"), [90.0, 60.0])]
+        for values, scale, heights in cases:
+            with self.subTest(values):
+                snap = self.run_page([self.readings(range(2), cpu=lambda s: values[s],
+                                                    ram=lambda s: "%.2f" % float(values[s]))])[1]
+                for graph in ("cpu-spark", "ram-spark"):
+                    self.assertEqual(marks(snap, graph), scale)
+                    self.assertEqual(ys(snap, graph), heights)
+
+    def test_a_single_reading(self):
+        """Centred on it: on the multiple of 5 % closest to it."""
+        for value, scale, height in (("19.2", ("25%", "15%"), 58.0), ("20.0", ("25%", "15%"), 50.0),
+                                     ("23.0", ("30%", "20%"), 70.0), ("50.0", ("55%", "45%"), 50.0)):
+            with self.subTest(value):
+                snap = self.run_page([self.readings([0], cpu=lambda s: value)])[1]
+                self.assertEqual(marks(snap, "cpu-spark"), scale)
+                self.assertEqual(ys(snap, "cpu-spark"), [height])
+
+    def test_empty_until_the_first_reading(self):
+        loaded = self.run_page([])[0]
+        for graph in ("cpu-spark", "ram-spark"):
+            self.assertEqual(marks(loaded, graph), ("", ""))
+
+    def test_a_gap_in_the_readings(self):
+        """60 seconds without a reading cut the line; the scale takes the readings on both sides. An unreadable
+        value leaves a hole and does not count."""
+        snap = self.run_page([self.readings(list(range(10)) + list(range(70, 80)),
+                                            cpu=lambda s: "30.0" if s < 10 else "42.0")])[1]
+        self.assertEqual([len(sub) for sub in line(snap, "cpu-spark", "used")], [10, 10])
+        self.assertEqual(marks(snap, "cpu-spark"), ("45%", "30%"))
+        self.assertEqual(set(ys(snap, "cpu-spark")), {100.0, 20.0})
+        hole = {"batch": [at(s, "live", dict(live(cpu="30.0"), ram=dict(live()["ram"], perutil="?" if s == 5 else
+                                                                            "19.20"))) for s in range(10)]}
+        snap = self.run_page([hole])[1]
+        self.assertEqual([len(sub) for sub in line(snap, "ram-spark", "used")], [5, 4])
+        self.assertEqual(marks(snap, "ram-spark"), ("25%", "15%"))
+
+    def test_the_labels_follow_the_window_as_it_slides(self):
+        """A spike at 80 % widens the scale while it is in the last 5 minutes, and only then."""
+        cpu = lambda s: "80.0" if s == 20 else "10.0"  # noqa: E731
+        snaps = self.run_page([self.readings(range(20), cpu=cpu), self.readings([20], cpu=cpu),
+                               self.readings(range(21, 321), cpu=cpu),  # the spike reaches the left edge
+                               self.readings([321], cpu=cpu)])  # and leaves the window
+        self.assertEqual([marks(s, "cpu-spark") for s in snaps[1:]],
+                         [("15%", "5%"), ("80%", "10%"), ("80%", "10%"), ("15%", "5%")])
+        self.assertEqual(set(ys(snaps[1], "cpu-spark")), {50.0})
+        self.assertEqual(line(snaps[2], "cpu-spark", "used")[0][-1], (300.0, 0.0))
+        self.assertEqual(set(ys(snaps[3], "cpu-spark")), {0.0, 100.0})
+        self.assertEqual(line(snaps[3], "cpu-spark", "used")[0][0], (0.0, 0.0))
+        self.assertEqual(set(ys(snaps[4], "cpu-spark")), {50.0})
+
+    def test_the_cpu_info_card_and_the_disk_tile_keep_0_to_100(self):
+        """The same readings: the CPU tile zooms, the CPU Info card's graph keeps 0 to 100 %, and so does the Disk /
+        tile; the Network tile keeps the scale of the bandwidth graph."""
+        steps = {"batch": [step for s in range(30) for step in (
+            at(s, "live", live(cpu=("19.1", "19.3")[s % 2], ram="19.20")),
+            at(s, "speed", speed("1.00 MiB/s", "512.00 KiB/s")))]}
+        snap = self.run_page([steps])[1]
+        self.assertEqual(marks(snap, "cpu-spark"), ("25%", "15%"))
+        self.assertEqual(set(ys(snap, "cpu-spark")), {57.0, 59.0})
+        self.assertEqual(marks(snap, "cpu-graph"), ("100%", "50%"))
+        self.assertEqual(set(ys(snap, "cpu-graph")), {80.7, 80.9})
+        self.assertEqual(marks(snap, "disk-spark"), ("100%", "50%"))
+        self.assertEqual(set(ys(snap, "disk-spark")), {58.1})
+        self.assertEqual(marks(snap, "net-spark"), marks(snap, "net-graph"))
+        self.assertEqual(line(snap, "net-spark", "rx"), line(snap, "net-graph", "rx"))
 
 
 class Sections(OverviewTest):

@@ -107,6 +107,8 @@ class Page(unittest.TestCase):
                 self.assertNotIn("d", path["attrs"])  # empty when the page loads
         for label in ("top", "middle"):
             self.assertIsNotNone(find(plot, f"{graph}-{label}"), f"#{graph}-{label} is missing")
+        self.assertIsNone(find(plot, f"{graph}-bottom"))  # the scale starts at 0: its middle is labelled
+        self.assertEqual(plot["attrs"]["class"], "live-graph-plot")
 
     def test_the_admin_page_has_both_graphs(self):
         root = self.tree("tester")

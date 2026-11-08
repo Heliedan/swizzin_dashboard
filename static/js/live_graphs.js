@@ -10,6 +10,9 @@
    the "d" of the existing paths, and the texts that changed.
    Time: each reading is placed at the time it arrived (Date.now(), which keeps counting while a tablet sleeps).
    No reading for more than GAP seconds, or a lost connection, cuts the line: the gap shows, as long as it lasted.
+   Scale: each graph has its own (see GRAPHS), which gives the bottom and the top of the height from the lowest and the
+   highest reading of the window: the bandwidth from 0 to a top that follows the highest, the CPU Info card and the
+   Disk / tile from 0 to 100 %, the CPU and Memory tiles of Overview zoomed on their readings (ZOOMED_PERCENT_SCALE).
    Legend: a series that has a button (#id-key-toggle, Down and Up of the bandwidth) can be hidden; the scale then
    follows the series still shown, and the last one shown cannot be hidden. The choice is remembered by the browser
    (localStorage, see remember() and recall()). */
@@ -22,6 +25,8 @@
   var MIN_TOP = 1024;  // bytes per second: the bandwidth scale never goes below 1 KiB/s
   // The tops of the bandwidth scale, in its unit: the highest reading of the window fills 2/3 of the height or more.
   var STEPS = [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 600, 800, 1000];
+  var ZOOM_STEP = 5;  // percentage points: the bottom and the top of a zoomed scale are multiples of it
+  var ZOOM_MIN_SPAN = 10;  // percentage points: the least height of a zoomed scale, so that tiny moves stay small
 
   // Texts shown by this file. The units are those of the speed display (GetHumanReadableBi in core/util.py).
   var TEXT = {
@@ -57,15 +62,17 @@
     return isFinite(v) ? Math.max(0, Math.min(100, v)) : null;
   }
 
-  // Bandwidth: the scale goes up to the next step (STEPS) of the unit of the highest reading of the window.
+  // A scale: range(lowest, highest) gives the bottom and the top of the height, [bottom, top], from the lowest and the
+  // highest reading of the window (both null when it has none); label(v) writes a value of the scale.
+  // Bandwidth: from 0 up to the next step (STEPS) of the unit of the highest reading of the window.
   var BANDWIDTH_SCALE = {
-    top: function (max) {
-      var v = Math.max(max, MIN_TOP), unit = 0;
+    range: function (lowest, highest) {
+      var v = Math.max(highest || 0, MIN_TOP), unit = 0;
       while (v >= 1024 && unit < TEXT.units.length - 1) { v /= 1024; unit += 1; }
       for (var i = 0; i < STEPS.length; i++) {
-        if (v <= STEPS[i]) { return STEPS[i] * Math.pow(1024, unit); }
+        if (v <= STEPS[i]) { return [0, STEPS[i] * Math.pow(1024, unit)]; }
       }
-      return Math.pow(1024, unit + 1);  // above 1000 of a unit: 1 of the next one
+      return [0, Math.pow(1024, unit + 1)];  // above 1000 of a unit: 1 of the next one
     },
     label: function (v) {
       var unit = 0;
@@ -75,13 +82,30 @@
   };
 
   var PERCENT_SCALE = {  // always 0 to 100 %
-    top: function () { return 100; },
+    range: function () { return [0, 100]; },
     label: function (v) { return v + TEXT.percent; },
   };
 
+  // Zoomed on the readings of the window: from the multiple of ZOOM_STEP at or below the lowest to the one at or above
+  // the highest, so that a change of a few points shows. Less than ZOOM_MIN_SPAN points high, it is widened to that,
+  // centred on the readings (19.1 to 19.3 %: 15 to 25 %), within 0 to 100 %. No reading: 0 to 100 %.
+  var ZOOMED_PERCENT_SCALE = {
+    range: function (lowest, highest) {
+      if (lowest === null) { return [0, 100]; }
+      var bottom = Math.floor(lowest / ZOOM_STEP) * ZOOM_STEP, top = Math.ceil(highest / ZOOM_STEP) * ZOOM_STEP;
+      if (top - bottom < ZOOM_MIN_SPAN) {  // its middle: the multiple of ZOOM_STEP closest to that of the readings
+        bottom = Math.round(((lowest + highest) / 2 - ZOOM_MIN_SPAN / 2) / ZOOM_STEP) * ZOOM_STEP;
+        bottom = Math.max(0, Math.min(bottom, 100 - ZOOM_MIN_SPAN));
+        top = bottom + ZOOM_MIN_SPAN;
+      }
+      return [bottom, top];
+    },
+    label: PERCENT_SCALE.label,
+  };
+
   // One graph: the element #id of the page, one series per key (its paths #id-key-area and #id-key-line, its current
-  // value #id-key-now and its button #id-key-toggle if the legend has them), and the scale labels #id-top and
-  // #id-middle.
+  // value #id-key-now and its button #id-key-toggle if the legend has them), and the scale labels it has among #id-top,
+  // #id-middle and #id-bottom.
   function Graph(id, keys, scale) {
     function get(suffix) { return document.getElementById(id + '-' + suffix); }
     this.id = id;
@@ -93,6 +117,7 @@
     });
     this.top = get('top');
     this.middle = get('middle');
+    this.bottom = get('bottom');
     this.readings = [];  // {t: ms, v: [a value or null per series], cut: true if the line does not join the previous}
     this.texts = [];  // the values as received, for the legend
     this.cutNext = false;  // the connection was lost: the next reading starts a new line
@@ -119,21 +144,26 @@
     if (r.length && now < r[r.length - 1].t) { now = r[r.length - 1].t; }
     this.trim(now);
     if (document.hidden) { return; }  // nothing to paint in a hidden tab: drawn again when it is shown
-    var max = 0, self = this;
+    var lowest = null, highest = null, self = this;
     r.forEach(function (x) {  // the scale follows the series shown only
-      x.v.forEach(function (v, i) { if (v !== null && v > max && !self.series[i].hidden) { max = v; } });
+      x.v.forEach(function (v, i) {
+        if (v === null || self.series[i].hidden) { return; }
+        if (lowest === null || v < lowest) { lowest = v; }
+        if (highest === null || v > highest) { highest = v; }
+      });
     });
-    var top = this.scale.top(max);
+    var range = this.scale.range(lowest, highest);
     this.series.forEach(function (s, i) {
-      var p = s.hidden ? { area: '', line: '' } : paths(r, i, now, top);
+      var p = s.hidden ? { area: '', line: '' } : paths(r, i, now, range);
       setPath(s.area, p.area);
       setPath(s.line, p.line);
       var text = self.texts[i];
       setText(s.now, typeof text === 'string' && text ? text : TEXT.none);
     });
     if (r.length) {
-      setText(this.top, this.scale.label(top));
-      setText(this.middle, this.scale.label(top / 2));
+      setText(this.top, this.scale.label(range[1]));
+      setText(this.middle, this.scale.label((range[0] + range[1]) / 2));
+      setText(this.bottom, this.scale.label(range[0]));
     }
   };
 
@@ -171,12 +201,14 @@
   };
 
   // The "d" of series i: a line, and the area under it, one piece per stretch of readings without a cut or a hole.
-  function paths(readings, i, now, top) {
-    var line = '', area = '', open = false, lastX = 0;
+  // range: [bottom, top] of the scale, drawn at the bottom (100) and the top (0) of the height.
+  function paths(readings, i, now, range) {
+    var line = '', area = '', open = false, lastX = 0, bottom = range[0], span = range[1] - range[0];
     readings.forEach(function (x) {
       var v = x.v[i];
       if (v === null) { close(); return; }
-      var px = round(WINDOW - (now - x.t) / 1000), py = round(100 - Math.min(v / top, 1) * 100);
+      var px = round(WINDOW - (now - x.t) / 1000);
+      var py = round(100 - Math.max(0, Math.min((v - bottom) / span, 1)) * 100);
       if (!open || x.cut) {
         close();
         line += 'M' + px + ' ' + py;
@@ -229,8 +261,8 @@
   var GRAPHS = [
     { id: 'cpu-graph', event: 'live', keys: ['used'], scale: PERCENT_SCALE, read: cpuUsed },
     { id: 'net-graph', event: 'speed', keys: ['rx', 'tx'], scale: BANDWIDTH_SCALE, read: speeds },  // the admin only
-    { id: 'cpu-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE, read: cpuUsed },
-    { id: 'ram-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE,
+    { id: 'cpu-spark', event: 'live', keys: ['used'], scale: ZOOMED_PERCENT_SCALE, read: cpuUsed },
+    { id: 'ram-spark', event: 'live', keys: ['used'], scale: ZOOMED_PERCENT_SCALE,
       read: function (d) { return d.ram ? [[percent(d.ram.perutil)], []] : null; } },
     { id: 'disk-spark', event: 'live', keys: ['used'], scale: PERCENT_SCALE,
       read: function (d) {  // the root disk; unreadable or missing: a hole

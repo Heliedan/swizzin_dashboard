@@ -110,3 +110,11 @@
   .ov-network .live-graph-plot { height: 160px; }
   .ov-periods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* The CPU and Memory tiles: their scale zooms on the readings of the window (static/js/live_graphs.js), and its top
+   and its bottom are written on the left of the graph, out of its way, each next to a faint line. */
+.ov-tile .live-graph-has-bottom { padding-left: 2.25rem; }
+.ov-tile .live-graph-has-bottom .live-graph-grid { display: inline; }
+.ov-tile .live-graph-has-bottom .live-graph-scale { display: block; top: 0; left: 0; width: 2rem; text-align: right;
+  color: #b0b0b0; text-shadow: none; font-variant-numeric: tabular-nums; }
+.ov-tile .live-graph-has-bottom .live-graph-bottom { top: auto; bottom: 0; }
