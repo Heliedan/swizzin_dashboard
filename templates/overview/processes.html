@@ -1,0 +1,25 @@
+{# Block "processes" of core/overview_blocks.py: Top processes, a section of Details (TOP_PROCESSES in swizzin.cfg). The
+   programs that use the most CPU and the most memory, by their name only: every program for the admin, their own for
+   another account (core/processes.py). static/js/processes.js fills the lists from /stats/processes, every 5 seconds
+   while the section is open, and asks nothing while it is closed. The bars repeat the number next to them. #}
+        {% if config.TOP_PROCESSES %}
+        <details class="card ov-section" data-section="processes"><summary class="card-header">Top processes</summary>
+          <div class="card-body ov-processes" id="ov-processes" data-url="{{ url_for('processes.processes') }}" data-logout="{{ url_for('logout') }}">
+            <p class="ov-processes-about">{% if admin %}The programs of every account{% else %}Your programs{% endif %}, by their name, updated every 5 seconds while this section is open.</p>
+            <p class="ov-processes-about" id="ov-processes-info"></p>
+            <p class="ov-processes-message" id="ov-processes-message" role="status"></p>
+            {%- for list, title in (("cpu", "By CPU"), ("memory", "By memory")) %}
+            <h3 class="ov-processes-title" id="ov-processes-{{ list }}-title">{{ title }}</h3>
+            <table class="table table-sm ov-processes-table" id="ov-processes-{{ list }}-table" aria-labelledby="ov-processes-{{ list }}-title" hidden>
+              <thead><tr>
+                <th scope="col">Program</th><th scope="col">User</th>
+                <th scope="col" class="ov-processes-number">CPU</th><th scope="col" class="ov-processes-number">Memory</th>
+                <th class="ov-processes-bar" aria-hidden="true"></th>
+              </tr></thead>
+              <tbody id="ov-processes-{{ list }}"></tbody>
+            </table>
+            <p class="ov-processes-empty" id="ov-processes-{{ list }}-empty" hidden></p>
+            {%- endfor %}
+          </div>
+        </details>
+        {% endif %}

@@ -22,6 +22,7 @@ class Config:
     SERVICE_LOGS = True  # the admin's Logs buttons of Service Info, in Overview (core/service_logs.py)
     SERVICE_LOGS_LINES = 100  # lines of the journal they show, 1 to 200
     SIGNIN_HISTORY_DAYS = 30  # the admin's Panel sign-ins, in Overview: days kept in signins.json, 0 = in memory only
+    TOP_PROCESSES = True  # Overview: the section Top processes of the Details (core/processes.py)
 
     NETWORK_INFO_CUTOFF = "YYYY-MM-DD"
     NETWORK_INFO_TOP = True
