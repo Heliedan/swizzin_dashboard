@@ -158,7 +158,7 @@ f{% macro build_sidebar(pages, vendor) %}
                 </div>
 {%- endmacro %}
 
-{% macro build_app_table(apps) %}
+{% macro build_app_table(apps, logs=False) %}
 <div class="card border-dark mt-3">
   <div class="card-header">Service Info</div>
   <div class="card-body">
@@ -173,7 +173,7 @@ f{% macro build_sidebar(pages, vendor) %}
             {% for app in apps|sort(attribute="pretty_name") if app.systemd %}
             <tr>
                 <td class="align-middle"><span class="align-middle">{{ app.pretty_name }}</span></td>
-                <td class="align-middle text-center"><a post="true" phref="{{ url_for('service') }}" pdata='{"user": "{{ user }}", "function": "restart", "application": "{{ app.name }}"}' class="btn btn-xs btn-secondary"><i class="fa fa-refresh"></i>Restart</a></td>
+                <td class="align-middle text-center{{ ' ov-service-actions' if logs }}"><a post="true" phref="{{ url_for('service') }}" pdata='{"user": "{{ user }}", "function": "restart", "application": "{{ app.name }}"}' class="btn btn-xs btn-secondary"><i class="fa fa-refresh"></i>Restart</a>{% if logs %}<button type="button" class="btn btn-xs btn-secondary" id="logs_{{ app.name }}" data-logs="{{ app.name }}" aria-controls="ov-logs" aria-expanded="false">Logs<span class="sr-only"> of {{ app.pretty_name }}</span></button>{% endif %}</td>
                 <td class="align-middle text-center"><span id="status_{{ app.name }}" class="indicator"></span></td>
                 <td class="align-middle text-center"><input data-toggle="toggle" post="true" phref="{{ url_for('service') }}" pdata='{"application": "{{ app.name }}"}' type="checkbox" data-size="xs" data-on="Enabled" data-off="Disabled" data-onstyle="outline-success" data-offstyle="outline-danger" id="enabled_{{ app.name }}"></td>
             </tr>

@@ -1,2 +1,20 @@
-{# Block "services" of core/overview_blocks.py: Service Info, the same table as in Classic. #}
-    {{ macros.build_app_table(apps=pages) }}
+{# Block "services" of core/overview_blocks.py: Service Info, the same table as in Classic. For the admin, a Logs button
+   on each line (SERVICE_LOGS in swizzin.cfg), and the panel where the lines of the journal show, under the row, across
+   its width (static/js/service_logs.js, core/service_logs.py). #}
+    {{ macros.build_app_table(apps=pages, logs=admin and config.SERVICE_LOGS) }}
+    {%- if admin and config.SERVICE_LOGS %}
+    <section class="card ov-logs" id="ov-logs" aria-labelledby="ov-logs-title" tabindex="-1" data-url="{{ url_for('service_logs.logs') }}" data-logout="{{ url_for('logout') }}" hidden>
+      <div class="card-header ov-logs-head">
+        <h2 class="ov-card-title" id="ov-logs-title">Logs</h2>
+        <div class="ov-logs-actions">
+          <button type="button" class="btn btn-sm btn-secondary" id="ov-logs-refresh">Refresh</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="ov-logs-close">Close</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="ov-logs-state" id="ov-logs-state"></p>
+        <p class="ov-logs-message" id="ov-logs-message" role="status"></p>
+        <pre class="ov-logs-lines" id="ov-logs-lines" tabindex="0" aria-label="Lines of the journal" hidden></pre>
+      </div>
+    </section>
+    {%- endif %}
