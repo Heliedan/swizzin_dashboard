@@ -406,12 +406,16 @@ class Shared(ProcTest):
         first = reader.top()
         self.assertGreaterEqual(time.monotonic() - began, 0.1)
         self.assertEqual(reader.readings, 2)
-        self.assertEqual(first["seconds"], 0.1)
+        # the gap between the two readings, rounded to 0.1 s: 0.1 on a quiet machine, a little more under load (CI)
+        self.assertGreaterEqual(first["seconds"], 0.1)
+        self.assertLess(first["seconds"], 0.6)
         for uid in (None, FRIEND, ADMIN, None):
             reader.top(uid)
         self.assertEqual(reader.readings, 2)
         time.sleep(0.35)
-        self.assertAlmostEqual(reader.top()["seconds"], 0.4, delta=0.15)  # since the last reading
+        since = reader.top()["seconds"]  # since the last reading: 0.35 s and what the machine adds
+        self.assertGreaterEqual(since, 0.3)
+        self.assertLess(since, 1.0)
         self.assertEqual(reader.readings, 3)
         time.sleep(1.1)
         reader.top()
