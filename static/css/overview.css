@@ -9,6 +9,24 @@
 .ov-heading { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.75rem; margin-bottom: 0.75rem; }
 .ov-title { margin: 0; font-size: 1.25rem; }
 .ov-hint { font-size: 0.8125rem; color: #b0b0b0; }
+/* Reboot required and pending updates (static/js/system_status.js, the admin only): pills at the right end of the
+   heading of At a glance, under it on a narrow screen. Orange: a reboot, or security updates; grey otherwise. A tap
+   or a click opens a pill's details, under the pills, over the tiles. */
+.ov-status { position: relative; margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-pill > summary { display: flex; align-items: center; list-style: none; cursor: pointer; font-size: 0.8125rem;
+  font-weight: 700; line-height: 1.4; white-space: nowrap; color: #b0b0b0; background-color: #303030;
+  border: 1px solid #444; border-radius: 10px; padding: 1px 8px; }
+.ov-pill > summary::-webkit-details-marker { display: none; }
+.ov-pill > summary::after { content: ""; width: 0.4em; height: 0.4em; margin: 0 0 0.2em 0.5em;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.ov-pill[open] > summary::after { margin-bottom: -0.2em; transform: rotate(-135deg); }
+.ov-pill[data-level="warning"] > summary { color: #1e1e1e; background-color: #f39c12; border-color: #f39c12; }
+.ov-pill > summary:focus { outline: none; }
+.ov-pill > summary:focus-visible { outline: 2px solid #5dade2; outline-offset: 2px; }
+.ov-pill-more { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: max-content;
+  max-width: min(360px, calc(100vw - 32px)); margin: 0; padding: 8px 12px; font-size: 0.8125rem; color: #e0e0e0;
+  background-color: #303030; border: 1px solid #444; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  overflow-wrap: anywhere; }
 
 /* Panels: the cards of this page, Service Info and the sections of the Details included. */
 .overview .card { border: 1px solid #444 !important; border-radius: 8px; overflow: hidden; }

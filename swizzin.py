@@ -73,6 +73,9 @@ except Exception:
 layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))
 app.jinja_env.globals["dashboard_layouts"] = layouts.LAYOUTS  # the choices of the account menu (templates/macros.html)
 app.jinja_env.globals["overview_blocks"] = overview_blocks  # the blocks of Overview (templates/overview.html)
+# Reboot required and pending updates, for the admin's Overview (see the README): apt-get runs in the background.
+from core.system_status import PendingUpdates, reboot_status, updates_check
+pending_updates = PendingUpdates(app.logger, updates_check(app.config, app.logger))
 
 #Prepare the background threads
 thread = None
@@ -331,6 +334,17 @@ def loadavg(user):
     numcpu = os.cpu_count()
     perutil = '{0:.2f}'.format((float(loadavg[0]) / numcpu) * 100)
     return flask.jsonify({"1m": loadavg[0], "5m": loadavg[1], "15m": loadavg[2], "perutil": perutil})
+
+@app.route('/stats/system-status')
+@htpasswd.required
+def system_status(user):
+    # The pills Reboot required and pending updates of Overview (core/system_status.py), for the admin only. Answers
+    # at once: the count of updates is worked out in the background, and the page asks again while it is.
+    if user != app.config['ADMIN_USER']:
+        flask.abort(403)
+    response = flask.jsonify(reboot=reboot_status(), updates=pending_updates.status())
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 @app.route('/stats/vnstat')
 @htpasswd.required

@@ -1,0 +1,13 @@
+{# Reboot required and pending updates, after the title of At a glance, for the admin only (core/system_status.py,
+   filled by static/js/system_status.js from /stats/system-status). Each pill shows only when it has something to say;
+   a tap or a click opens its details, under the pills. Hidden until the first answer. #}
+{%- if admin %}
+      <div class="ov-status" id="ov-status" data-url="{{ url_for('system_status') }}"
+           data-logout="{{ url_for('logout') }}" hidden>
+        {%- for name in ('reboot', 'updates') %}
+        <details class="ov-pill" id="ov-{{ name }}" hidden>
+          <summary id="ov-{{ name }}-text"></summary><p class="ov-pill-more" id="ov-{{ name }}-more"></p>
+        </details>
+        {%- endfor %}
+      </div>
+{%- endif %}
