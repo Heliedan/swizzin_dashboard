@@ -31,6 +31,8 @@ BLOCKS = [
     {"id": "disks", "zone": "right", "template": "overview/disks.html", "label": "Disk Info"},
     {"id": "quota", "zone": "right", "template": "overview/quota.html", "label": "Disk Quota Info"},
     {"id": "network", "zone": "right", "template": "overview/network.html", "label": "Network Info"},
+    {"id": "signins", "zone": "right", "template": "overview/signins.html", "label": "Panel sign-ins",
+     "script": "js/signins.js"},
 ]
 
 
