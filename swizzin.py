@@ -74,6 +74,12 @@ try:  # Logs buttons of Service Info (core/service_logs.py, see the README): a p
 except Exception:
     app.config["SERVICE_LOGS"] = False
     app.logger.exception("Service logs disabled: they could not be loaded")
+try:  # Top processes, in the Details of Overview (core/processes.py, see the README): a problem there must not stop it
+    from core import processes
+    processes.register(app, htpasswd)
+except Exception:
+    app.config["TOP_PROCESSES"] = False
+    app.logger.exception("Top processes disabled: they could not be loaded")
 
 # Layout of the dashboard chosen by each account, Classic or Overview (see the README): kept next to swizzin.cfg.
 layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))

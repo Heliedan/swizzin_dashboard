@@ -21,6 +21,7 @@ class Config:
     UPDATES_CHECK = True  # Overview: count the pending updates of apt for the admin (core/system_status.py)
     SERVICE_LOGS = True  # the admin's Logs buttons of Service Info, in Overview (core/service_logs.py)
     SERVICE_LOGS_LINES = 100  # lines of the journal they show, 1 to 200
+    TOP_PROCESSES = True  # Overview: the section Top processes of the Details (core/processes.py)
 
     NETWORK_INFO_CUTOFF = "YYYY-MM-DD"
     NETWORK_INFO_TOP = True
