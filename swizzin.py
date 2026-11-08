@@ -68,6 +68,12 @@ try:  # App Store page (core/custom/store, see the README): a problem there must
     app_store.register(app, socketio, htpasswd)
 except Exception:
     app.logger.exception("App Store disabled: it could not be loaded")
+try:  # Logs buttons of Service Info (core/service_logs.py, see the README): a problem there must not stop the panel
+    from core import service_logs
+    service_logs.register(app, htpasswd)
+except Exception:
+    app.config["SERVICE_LOGS"] = False
+    app.logger.exception("Service logs disabled: they could not be loaded")
 
 # Layout of the dashboard chosen by each account, Classic or Overview (see the README): kept next to swizzin.cfg.
 layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))

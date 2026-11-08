@@ -101,6 +101,24 @@
 .ov-section > .card { border: 0 !important; border-radius: 0; margin: 0 !important; overflow: visible; }
 .ov-section > .card > .card-header { display: none !important; }  /* !important: some have Bootstrap's d-flex */
 
+/* Service logs (static/js/service_logs.js, the admin only): a Logs button under each Restart of Service Info. The
+   panel of the logs follows Service Info in the row and takes its whole width, under the bandwidth graph and the
+   services; Service Info, no longer the last card of the row, keeps its width. The lines wrap rather than scroll
+   sideways, for a phone. */
+.ov-row > .card.ov-logs { flex: 1 1 100%; }
+.ov-row > .card:not(.ov-network):not(.ov-logs) { flex: 1 1 300px; }
+.ov-service-actions .btn { display: block; width: 4.75rem; margin: 2px auto; }  /* Restart above Logs, same width */
+.ov-logs-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.ov-logs-actions { display: flex; gap: 8px; }
+.ov-logs:focus:not(:focus-visible) { outline: none; }
+.ov-logs:focus-visible { outline: 2px solid #5dade2; outline-offset: 2px; }
+.ov-logs-state, .ov-logs-message { margin-bottom: 0.5rem; font-size: 0.875rem; overflow-wrap: anywhere; }
+.ov-logs-state { color: #b0b0b0; }
+.ov-logs-message:empty { margin: 0; }
+.ov-logs-lines { max-height: 60vh; overflow: auto; margin: 0; padding: 8px 12px; background-color: #1e1e1e;
+  color: #e0e0e0; border: 1px solid #444; border-radius: 6px; font-size: 0.75rem; line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+
 @media (max-width: 575.98px) {
   .overview { padding-left: 12px; padding-right: 12px; }
   .ov-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

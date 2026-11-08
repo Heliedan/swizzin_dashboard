@@ -166,7 +166,9 @@ class Pages(PageTest):
         self.assertEqual(re.findall(r'<details class="ov-pill" id="([\w-]+)" hidden>', heading),
                          ["ov-reboot", "ov-updates"])
         scripts = re.findall(r'src="/static/(js/[\w-]+\.js)"', page)
-        self.assertEqual(scripts[-2:], ["js/overview.js", "js/system_status.js"])
+        # after the layout's own script, wherever the other blocks put theirs (core/overview_blocks.py)
+        self.assertIn("js/system_status.js", scripts)
+        self.assertLess(scripts.index("js/overview.js"), scripts.index("js/system_status.js"))
         self.assertFalse(self.updates.running)  # the page itself never runs apt-get: its script asks
 
     def test_nothing_for_another_account(self):
