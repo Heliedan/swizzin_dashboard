@@ -250,12 +250,16 @@ class Sections(OverviewTest):
 
     ALL = {"cpu": False, "ram": False, "disks": False, "network": False}
 
+    def cards(self, snap):
+        """The sections of the cards of Classic in `snap`, open or not: other blocks of Details test their own."""
+        return {k: v for k, v in snap["sections"].items() if k in ("cpu", "ram", "disks", "quota", "network")}
+
     def test_closed_when_the_page_loads(self):
-        self.assertEqual(self.run_page([], storage={})[0]["sections"], self.ALL)
+        self.assertEqual(self.cards(self.run_page([], storage={})[0]), self.ALL)
 
     def test_a_click_opens_a_section_and_the_browser_remembers_it(self):
         snaps = self.run_page([{"summary": "cpu"}, {"summary": "disks"}, {"summary": "cpu"}], storage={})
-        self.assertEqual([s["sections"] for s in snaps[1:]],
+        self.assertEqual([self.cards(s) for s in snaps[1:]],
                          [dict(self.ALL, cpu=True), dict(self.ALL, cpu=True, disks=True), dict(self.ALL, disks=True)])
         self.assertEqual([s["storage"] for s in snaps], [{}, {STORE_KEY: "cpu"}, {STORE_KEY: "cpu,disks"},
                                                          {STORE_KEY: "disks"}])
@@ -264,18 +268,18 @@ class Sections(OverviewTest):
         for stored, opened in (("disks,network", {"disks", "network"}), ("nonsense,cpu,", {"cpu"}), ("", set())):
             with self.subTest(stored):
                 loaded = self.run_page([], storage={STORE_KEY: stored})[0]
-                self.assertEqual({k for k, v in loaded["sections"].items() if v}, opened)
+                self.assertEqual({k for k, v in self.cards(loaded).items() if v}, opened)
 
     def test_without_a_usable_storage_they_start_closed_and_still_open(self):
         for storage in (None, "throws", "full"):
             with self.subTest(storage=storage):
                 loaded, clicked = self.run_page([{"summary": "ram"}], storage=storage)
-                self.assertEqual(loaded["sections"], self.ALL)
-                self.assertEqual(clicked["sections"], dict(self.ALL, ram=True))
+                self.assertEqual(self.cards(loaded), self.ALL)
+                self.assertEqual(self.cards(clicked), dict(self.ALL, ram=True))
 
     def test_the_sections_follow_the_rights_of_the_cards(self):
-        self.assertEqual(self.run_page([], user="friend")[0]["sections"], {"cpu": False, "ram": False, "disks": False})
-        self.assertEqual(self.run_page([], user="friend", quota=True)[0]["sections"],
+        self.assertEqual(self.cards(self.run_page([], user="friend")[0]), {"cpu": False, "ram": False, "disks": False})
+        self.assertEqual(self.cards(self.run_page([], user="friend", quota=True)[0]),
                          {"cpu": False, "ram": False, "quota": False})
 
 

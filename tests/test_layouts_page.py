@@ -28,6 +28,7 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
     f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\n")
 
 import swizzin  # noqa: E402
+from core import overview_blocks  # noqa: E402
 
 TRAP = "/mnt/<img src=x onerror=alert(1)> it's \"mine\" & yours"
 PAGES = [{"name": "rtorrent", "pretty_name": "rTorrent", "url": False, "systemd": "rtorrent@", "img": "rtorrent"},
@@ -80,6 +81,12 @@ class LayoutTest(unittest.TestCase):
         if body is not None:
             data = json.dumps(body)
         return self.client.post("/layout", data=data, content_type=content_type, headers=headers, **kw)
+
+    def assertInOrder(self, expected, found):
+        """Each of `expected` is in `found`, in this order; others may come between them (the blocks of Overview to
+        come, with their scripts)."""
+        rest = iter(found)
+        self.assertEqual([e for e in expected if e not in rest], [], found)
 
     def page(self, user, mounts=("/", "/mnt/data"), quota=False, shared=False, sbio=False, path="/"):
         locks = {"/install/.quota.lock": quota, "/install/.sbio.lock": sbio}
@@ -177,6 +184,8 @@ class Pages(LayoutTest):
         self.assertIn('class="card-columns live-layout"', page)
         for overview in ("overview.css", "overview.js", "ov-tiles", "ov-section", "tile-cpu", "cpu-spark"):
             self.assertNotIn(overview, page)
+        for name in overview_blocks.scripts() + overview_blocks.stylesheets():
+            self.assertNotIn(name, page)
 
     def test_the_default_of_swizzin_cfg(self):
         with mock.patch.object(swizzin.layout_choices, "default", "overview"):
@@ -229,21 +238,45 @@ class Pages(LayoutTest):
         # The bandwidth graph at the top, not in the Network Info card of the details.
         self.assertLess(ids.index("net-graph"), ids.index("ov-details"))
         self.assertGreater(ids.index("current_rx"), ids.index("ov-details"))
-        self.assertEqual(re.findall(r'data-section="(\w+)"', page), ["cpu", "ram", "disks", "network"])
+        self.assertInOrder(["cpu", "ram", "disks", "network"], re.findall(r'data-section="([\w-]+)"', page))
         self.assertIn('<details class="card ov-section" data-section="cpu"><summary class="card-header">CPU Info'
                       '</summary>', page)
         self.assertNotIn("<details open", page)
-        self.assertEqual(re.findall(r'(?:src|href)="/static/(css/overview\.css|js/\w+\.js)"', page),
-                         ["css/overview.css", "js/swizzin.js", "js/live_graphs.js", "js/live_stats.js",
-                          "js/overview.js"])
+        for name in overview_blocks.stylesheets() + overview_blocks.scripts():  # the layout's own, and its blocks'
+            self.assertEqual(page.count('="/static/%s"' % name), 1, name)
+        files = re.findall(r'(?:src|href)="/static/((?:css|js)/[\w-]+\.(?:css|js))"', page)
+        self.assertInOrder(["css/overview.css", "js/swizzin.js", "js/live_graphs.js", "js/live_stats.js",
+                            "js/overview.js"], files)
 
     def test_the_details_in_two_columns(self):
         """Two columns on a wide screen (static/css/overview.css), each stacking on its own: the machine on the left, the
         disks and the network on the right. In one column, on a narrow screen, the same order as Classic's cards."""
         page = self.overview("tester", quota=True)
-        found = re.findall(r'class="(live-stack|ov-column)"|data-section="(\w+)"', page[page.index('id="ov-details"'):])
-        self.assertEqual([a or b for a, b in found],
-                         ["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "network"])
+        found = re.findall(r'class="(live-stack|ov-column)"|data-section="([\w-]+)"',
+                           page[page.index('id="ov-details"'):])
+        self.assertInOrder(["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "network"],
+                           [a or b for a, b in found])
+
+    def test_the_page_follows_the_list_of_blocks(self):
+        """core/overview_blocks.py makes the page: a block moved in the list, or to another zone, moves on the page;
+        the script and the stylesheet of a block are loaded after the layout's own, on Overview only."""
+        blocks = {block["id"]: dict(block) for block in overview_blocks.BLOCKS}
+        blocks["quota"]["zone"] = "left"
+        blocks["network"].update(script="js/network-block.js", stylesheet="css/network-block.css")
+        order = ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "ram", "quota", "cpu",
+                 "network", "disks"]
+        with mock.patch.object(overview_blocks, "BLOCKS", [blocks[i] for i in order]):
+            page = self.overview("tester", quota=True)
+            found = re.findall(r'id="(tile-\w+|ov-network)"|class="card-header">(Service Info)<|class="(ov-column)"|'
+                               r'data-section="([\w-]+)"', page)
+            self.assertEqual([next(x for x in f if x) for f in found],
+                             ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "Service Info", "ov-network",
+                              "ov-column", "ram", "quota", "cpu", "ov-column", "network", "disks"])
+            files = re.findall(r'(?:src|href)="/static/((?:css|js)/[\w-]+\.(?:css|js))"', page)
+            self.assertInOrder(["css/live_stats.css", "css/overview.css", "css/network-block.css", "js/live_stats.js",
+                                "js/overview.js", "js/network-block.js"], files)
+            swizzin.layout_choices.set("tester", "classic")
+            self.assertNotIn("network-block", self.page("tester", quota=True))
 
     def test_the_overview_of_another_account(self):
         """As in Classic: no bandwidth for them (graph, speed table, totals), the Disk Info card without a quota."""

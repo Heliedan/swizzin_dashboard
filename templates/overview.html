@@ -4,7 +4,10 @@
    Classic layout, in sections closed by default.
    Same data, same rights, same element ids and the same scripts as Classic: nothing new is asked of the server. The
    tiles are filled by static/js/live_stats.js, their small graphs by static/js/live_graphs.js, the totals and the
-   sections by static/js/overview.js; the look is in static/css/overview.css. #}
+   sections by static/js/overview.js; the look is in static/css/overview.css.
+   The blocks of each zone (the tiles, the row under them, the two columns of Details) are listed in
+   core/overview_blocks.py, each with its template in templates/overview/, which may use the macros and the variables
+   set here (admin, disk_card). #}
 {% from 'live_graph.html' import live_graph, bandwidth_graph %}
 {% set admin = config.ADMIN_USER == user %}
 {% set disk_card = (quota == False or admin) %}
@@ -25,59 +28,12 @@
       <span class="ov-hint">Live, with the last 5 minutes</span>
     </div>
     <div class="ov-tiles">
-      <div class="ov-tile" id="tile-cpu">
-        <div class="ov-tile-head"><h3 class="ov-tile-label">CPU</h3><span class="ov-badge" id="tile-cpu-badge">--</span></div>
-        <div class="ov-tile-value" id="tile-cpu-value">--</div>
-        <div class="ov-tile-info"><span id="tile-cpu-cores">--</span> cores · load <span id="load1m">--</span></div>
-        {{ live_graph('cpu-spark', ['used'], 'CPU used over the last 5 minutes') }}
-      </div>
-      <div class="ov-tile" id="tile-ram">
-        <div class="ov-tile-head"><h3 class="ov-tile-label">Memory</h3><span class="ov-badge" id="tile-ram-badge">--</span></div>
-        <div class="ov-tile-value" id="tile-ram-value">--</div>
-        <div class="ov-tile-info" id="tile-ram-info">--</div>
-        {{ live_graph('ram-spark', ['used'], 'Memory used over the last 5 minutes') }}
-      </div>
-      {% if disk_card and '/' in mounts %}
-      <div class="ov-tile" id="tile-disk">
-        <div class="ov-tile-head"><h3 class="ov-tile-label">Disk /</h3><span class="ov-badge" id="tile-disk-badge">--</span></div>
-        <div class="ov-tile-value" id="tile-disk-value">--</div>
-        <div class="ov-tile-info" id="tile-disk-info">--</div>
-        {{ live_graph('disk-spark', ['used'], 'Space used on / over the last 5 minutes') }}
-      </div>
-      {% endif %}
-      {% if admin %}
-      <div class="ov-tile" id="tile-net">
-        <div class="ov-tile-head"><h3 class="ov-tile-label">Network</h3><span class="ov-badge" id="tile-net-badge">--</span></div>
-        <div class="ov-tile-value ov-net-value">
-          <span class="ov-down"><span aria-hidden="true">↓</span><span class="sr-only">Down</span> <span id="net-spark-rx-now">--</span></span>
-          <span class="ov-up"><span aria-hidden="true">↑</span><span class="sr-only">Up</span> <span id="net-spark-tx-now">--</span></span>
-        </div>
-        <div class="ov-tile-info">Interface <span id="tile-net-interface">--</span></div>
-        {{ live_graph('net-spark', ['rx', 'tx'], 'Download and upload speed over the last 5 minutes') }}
-      </div>
-      {% endif %}
+      {%- for block in overview_blocks.zone('tiles') %}{% include block.template %}{% endfor %}
     </div>
   </section>
 
   <div class="ov-row">
-    {% if admin %}
-    {# The bandwidth graph and its legend, as in Classic's Network Info card (which no longer has it here), and the
-       totals of vnstat, read from that card's bandwidth history when it is refreshed. #}
-    <section class="card ov-network" aria-labelledby="ov-network">
-      <div class="card-header"><h2 class="ov-card-title" id="ov-network">Network</h2></div>
-      <div class="card-body">
-        {{ bandwidth_graph() }}
-        <div class="ov-periods">
-          <div class="ov-period"><span class="ov-period-label">This hour</span><span class="ov-period-value">{{ amounts('ov-hour') }}</span></div>
-          <div class="ov-period"><span class="ov-period-label">Today</span><span class="ov-period-value">{{ amounts('ov-day') }}</span></div>
-          <div class="ov-period"><span class="ov-period-label">This month</span><span class="ov-period-value">{{ amounts('ov-month') }}</span></div>
-          <div class="ov-period"><span class="ov-period-label">All time</span><span class="ov-period-value">{{ amounts('ov-alltime') }}</span></div>
-        </div>
-        <p class="ov-periods-note" id="ov-periods-note" hidden></p>
-      </div>
-    </section>
-    {% endif %}
-    {{ macros.build_app_table(apps=pages) }}
+    {%- for block in overview_blocks.zone('row') %}{% include block.template %}{% endfor %}
   </div>
 
   {# The cards of the Classic layout, unchanged: each one in a <details> element, which the keyboard and screen readers
@@ -92,29 +48,10 @@
     </div>
     <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
       <div class="ov-column">
-        <details class="card ov-section" data-section="cpu"><summary class="card-header">CPU Info</summary>
-          {% include 'cpuinfo.html' %}
-        </details>
-        <details class="card ov-section" data-section="ram"><summary class="card-header">RAM Info</summary>
-          {% include 'raminfo_live.html' %}
-        </details>
+        {%- for block in overview_blocks.zone('left') %}{% include block.template %}{% endfor %}
       </div>
       <div class="ov-column">
-        {% if disk_card %}
-        <details class="card ov-section" data-section="disks"><summary class="card-header">Disk Info</summary>
-          {% include 'diskinfo_live.html' %}
-        </details>
-        {% endif %}
-        {% if quota == True %}
-        <details class="card ov-section" data-section="quota"><summary class="card-header">Disk Quota Info</summary>
-          {% include 'quotainfo.html' %}
-        </details>
-        {% endif %}
-        {% if (config.SHAREDSERVER == True or admin) %}
-        <details class="card ov-section" data-section="network"><summary class="card-header">Network Info</summary>
-          {% include 'netinfo.html' %}
-        </details>
-        {% endif %}
+        {%- for block in overview_blocks.zone('right') %}{% include block.template %}{% endfor %}
       </div>
     </div>
   </section>

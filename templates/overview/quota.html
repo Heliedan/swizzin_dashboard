@@ -1,0 +1,6 @@
+{# Block "quota" of core/overview_blocks.py: Disk Quota Info, a section of Details, when the quota is installed. #}
+        {% if quota == True %}
+        <details class="card ov-section" data-section="quota"><summary class="card-header">Disk Quota Info</summary>
+          {% include 'quotainfo.html' %}
+        </details>
+        {% endif %}

@@ -1,0 +1,18 @@
+{# Block "bandwidth" of core/overview_blocks.py. For the admin only, like the speed table of Classic. #}
+    {% if admin %}
+    {# The bandwidth graph and its legend, as in Classic's Network Info card (which no longer has it here), and the
+       totals of vnstat, read from that card's bandwidth history when it is refreshed. #}
+    <section class="card ov-network" aria-labelledby="ov-network">
+      <div class="card-header"><h2 class="ov-card-title" id="ov-network">Network</h2></div>
+      <div class="card-body">
+        {{ bandwidth_graph() }}
+        <div class="ov-periods">
+          <div class="ov-period"><span class="ov-period-label">This hour</span><span class="ov-period-value">{{ amounts('ov-hour') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">Today</span><span class="ov-period-value">{{ amounts('ov-day') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">This month</span><span class="ov-period-value">{{ amounts('ov-month') }}</span></div>
+          <div class="ov-period"><span class="ov-period-label">All time</span><span class="ov-period-value">{{ amounts('ov-alltime') }}</span></div>
+        </div>
+        <p class="ov-periods-note" id="ov-periods-note" hidden></p>
+      </div>
+    </section>
+    {% endif %}

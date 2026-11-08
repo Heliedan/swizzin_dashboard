@@ -5,14 +5,11 @@ folder belongs to its account, and neither git nor the panel's updates touch a f
 may keep more for an account, as an object with its layout under "layout" ({"user": {"layout": "overview", ...}}):
 this version reads that layout, so that going back to it keeps the account's choice.
 Reading never fails: a missing, unreadable or broken file, or a name this version does not know, gives the default
-(DASHBOARD_LAYOUT in swizzin.cfg), and the dashboard shows. Writing goes through a temporary file renamed over the
-old one, so that nobody ever reads half a file; it is readable by the panel's account only. The panel runs in one
-process (python swizzin.py): a lock keeps two choices made at the same moment from losing one of them."""
-import json
+(DASHBOARD_LAYOUT in swizzin.cfg), and the dashboard shows. The file is read and written by core/statefile.py: through
+a temporary file renamed over the old one, readable by the panel's account only, one choice at a time."""
 import logging
-import os
-import tempfile
-import threading
+
+from core import statefile
 
 LAYOUTS = {"classic": "Classic", "overview": "Overview"}  # name: label in the account menu, in this order
 DEFAULT = "classic"
@@ -36,34 +33,17 @@ def configured(config, logger=log):
     return DEFAULT
 
 
-class Choices:
+class Choices(statefile.StateFile):
     """The layout chosen by each account, in the JSON file `path`; `default` for the others."""
 
     def __init__(self, path, default=DEFAULT):
-        self.path = path
+        super().__init__(path)
         self.default = default
-        self.lock = threading.Lock()  # green under eventlet (swizzin.py patches threading): one write at a time
-
-    def _read(self):
-        """{user: layout} as written; {} when there is no file yet. Raises when it cannot be read, or is not an
-        object."""
-        try:
-            with open(self.path, encoding="utf-8") as f:
-                choices = json.load(f)
-        except FileNotFoundError:
-            return {}
-        if not isinstance(choices, dict):
-            raise ValueError("not a JSON object")
-        return choices
 
     def get(self, user):
         """The layout of `user`, or the default. Never raises: whatever the file holds, the dashboard must show.
         The choice is a layout's name, or an object with that name under "layout" (written by a later version)."""
-        try:
-            name = self._read().get(user)
-        except Exception as e:  # unreadable, broken JSON, a folder in its place, nested too deep...
-            log.warning("%s cannot be read (%s): the default layout is used", self.path, e)
-            return self.default
+        name = self.load(log, "the default layout is used").get(user)
         if isinstance(name, dict):
             name = name.get("layout")
         return name if known(name) else self.default
@@ -75,24 +55,6 @@ class Choices:
         if not known(name):
             raise ValueError("not a layout: %r" % (name,))
         with self.lock:
-            try:
-                choices = self._read()
-            except Exception as e:
-                log.warning("%s cannot be read (%s): it is written again", self.path, e)
-                choices = {}
+            choices = self.load(log, "it is written again")
             choices[user] = name
-            fd, tmp = tempfile.mkstemp(prefix=".layouts-", suffix=".tmp",
-                                       dir=os.path.dirname(os.path.abspath(self.path)))  # mode 0600
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(choices, f, indent=1, sort_keys=True)
-                    f.write("\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp, self.path)
-            except BaseException:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
+            self.write(choices)

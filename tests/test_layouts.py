@@ -1,4 +1,4 @@
-"""Where the layout chosen by each account is kept (core/layouts.py): the file never stops the dashboard.
+"""Where the layout of each account is kept (core/layouts.py, core/statefile.py): the file never stops the dashboard.
 
 The panel is not imported here: the threads of these tests are real system threads, not eventlet's.
 
@@ -19,7 +19,7 @@ from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from core import layouts  # noqa: E402
+from core import layouts, statefile  # noqa: E402
 
 
 class LayoutsTest(unittest.TestCase):
@@ -134,7 +134,7 @@ class Write(LayoutsTest):
             with open(src) as f:  # the new file, complete; the page reads the old one
                 seen.append((self.choices.get("tester"), json.load(f)))
             real_replace(src, dst)
-        with mock.patch.object(layouts.os, "replace", side_effect=replace):
+        with mock.patch.object(statefile.os, "replace", side_effect=replace):
             self.choices.set("tester", "overview")
         self.assertEqual(seen, [("classic", {"tester": "overview"})])
         self.assertEqual(self.choices.get("tester"), "overview")
@@ -143,7 +143,7 @@ class Write(LayoutsTest):
         self.choices.set("tester", "classic")
         for error in (OSError(28, "No space left on device"), KeyboardInterrupt()):
             with self.subTest(type(error).__name__):
-                with mock.patch.object(layouts.json, "dump", side_effect=error):
+                with mock.patch.object(statefile.json, "dump", side_effect=error):
                     with self.assertRaises(type(error)):
                         self.choices.set("tester", "overview")
                 self.assertEqual(self.content(), {"tester": "classic"})
@@ -177,7 +177,7 @@ class Write(LayoutsTest):
         def choose(user):
             start.wait()
             self.choices.set(user, "overview")
-        with mock.patch.object(layouts.os, "replace", side_effect=slow_replace):
+        with mock.patch.object(statefile.os, "replace", side_effect=slow_replace):
             threads = [threading.Thread(target=choose, args=(u,)) for u in users]
             for t in threads:
                 t.start()

@@ -1,0 +1,10 @@
+{# Block "tile-disk" of core/overview_blocks.py: the Disk / tile, filled by static/js/live_stats.js and
+   static/js/live_graphs.js. Same condition as the Disk Info card, and / among the mounts. #}
+      {% if disk_card and '/' in mounts %}
+      <div class="ov-tile" id="tile-disk">
+        <div class="ov-tile-head"><h3 class="ov-tile-label">Disk /</h3><span class="ov-badge" id="tile-disk-badge">--</span></div>
+        <div class="ov-tile-value" id="tile-disk-value">--</div>
+        <div class="ov-tile-info" id="tile-disk-info">--</div>
+        {{ live_graph('disk-spark', ['used'], 'Space used on / over the last 5 minutes') }}
+      </div>
+      {% endif %}

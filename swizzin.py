@@ -62,7 +62,7 @@ if app.config['RATELIMIT_ENABLED'] == True:
 
 from core.util import *
 from core.custom.live_stats import live_stats, read_thresholds, alert_level, mount_devices, mounts_read_apart, PROBE  # live CPU/RAM/disk cards (see LIVE-CARDS in the README)
-from core import layouts
+from core import layouts, overview_blocks
 try:  # App Store page (core/custom/store, see the README): a problem there must not stop the panel
     from core.custom import store as app_store
     app_store.register(app, socketio, htpasswd)
@@ -72,6 +72,7 @@ except Exception:
 # Layout of the dashboard chosen by each account, Classic or Overview (see the README): kept next to swizzin.cfg.
 layout_choices = layouts.Choices(os.path.join(app.root_path, layouts.FILE), layouts.configured(app.config, app.logger))
 app.jinja_env.globals["dashboard_layouts"] = layouts.LAYOUTS  # the choices of the account menu (templates/macros.html)
+app.jinja_env.globals["overview_blocks"] = overview_blocks  # the blocks of Overview (templates/overview.html)
 
 #Prepare the background threads
 thread = None

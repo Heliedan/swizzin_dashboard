@@ -1,0 +1,6 @@
+{# Block "network" of core/overview_blocks.py: Network Info, a section of Details. On a shared server, or the admin. #}
+        {% if (config.SHAREDSERVER == True or admin) %}
+        <details class="card ov-section" data-section="network"><summary class="card-header">Network Info</summary>
+          {% include 'netinfo.html' %}
+        </details>
+        {% endif %}
