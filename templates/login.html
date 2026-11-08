@@ -2,10 +2,12 @@
 <html lang="en">
     <head>
           <meta name="robots" content="noindex">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
         <title>{{ title }}</title>
         <script type="text/javascript" src="{{ url_for('static', filename='js/httpauth.js') }}"></script>
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
         <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon/favicon.ico') }}">
+        {% include 'head_icons.html' %}
         <link rel="stylesheet" type="text/css" href="https://stackpath.bootstrapcdn.com/bootswatch/4.4.1/darkly/bootstrap.min.css">
         <style type="text/css">
 html,
@@ -63,8 +65,8 @@ body {
       <div class="form-signin">
         <img class="mb-4" src="{{ url_for('static', filename='img/logo-sm.png') }}" alt="" width="72" height="72">
         <!--<h1 class="h3 mb-3 font-weight-normal">swizzin login</h1>-->
-        <label for="basic-username" class="sr-only">Username</label><input name="username" type="text" id="basic-username" class="form-control" placeholder="Username" required autofocus>
-        <label for="basic-password" class="sr-only">Password</label><input name="password" type="password" id="basic-password" class="form-control" placeholder="Password" required>
+        <label for="basic-username" class="sr-only">Username</label><input name="username" type="text" id="basic-username" class="form-control" placeholder="Username" required autofocus autocomplete="username">
+        <label for="basic-password" class="sr-only">Password</label><input name="password" type="password" id="basic-password" class="form-control" placeholder="Password" required autocomplete="current-password">
         <input type="submit" value="Login" id="btnsubmit" class="btn btn-lg btn-primary btn-block" onclick="login()">
       </div>
   </body>

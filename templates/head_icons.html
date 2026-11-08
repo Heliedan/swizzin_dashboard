@@ -1,0 +1,9 @@
+{# The home screen icon (iPad, iPhone, Android), in the head of every page of the panel: see "Home screen icon" in
+   the README. The manifest and the icons are in /static, which is served without a login: a phone reads them first. -#}
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='img/home/apple-touch-icon.png') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="swizzin">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#222222">
