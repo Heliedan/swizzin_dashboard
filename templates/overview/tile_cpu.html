@@ -4,5 +4,5 @@
         <div class="ov-tile-head"><h3 class="ov-tile-label">CPU</h3><span class="ov-badge" id="tile-cpu-badge">--</span></div>
         <div class="ov-tile-value" id="tile-cpu-value">--</div>
         <div class="ov-tile-info"><span id="tile-cpu-cores">--</span> cores · load <span id="load1m">--</span></div>
-        {{ live_graph('cpu-spark', ['used'], 'CPU used over the last 5 minutes') }}
+        {{ live_graph('cpu-spark', ['used'], 'CPU used over the last 5 minutes', bottom=True) }}
       </div>
