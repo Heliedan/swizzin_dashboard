@@ -15,6 +15,8 @@ from core.overview_blocks import BLOCKS, ZONES  # noqa: E402
 
 KEYS = {"id", "zone", "template", "label"}
 OPTIONAL = {"script", "stylesheet"}
+FLAGS = {"hidden", "open"}  # a block's state by default: True when given
+DETAILS = ("left", "right", "wide")  # the zones of Details, where each block is a section
 
 
 def template(block):
@@ -27,8 +29,11 @@ class Blocks(unittest.TestCase):
         for block in BLOCKS:
             with self.subTest(block.get("id")):
                 self.assertLessEqual(KEYS, set(block))
-                self.assertLessEqual(set(block), KEYS | OPTIONAL)  # a misspelt key would be left out in silence
-                for value in block.values():
+                self.assertLessEqual(set(block), KEYS | OPTIONAL | FLAGS)  # a misspelt key would be left out in silence
+                for key, value in block.items():
+                    if key in FLAGS:
+                        self.assertIs(value, True, key)  # only given when it is so: no "hidden": False
+                        continue
                     self.assertIsInstance(value, str)
                     self.assertEqual(value, value.strip())
                     self.assertTrue(value)
@@ -52,9 +57,9 @@ class Blocks(unittest.TestCase):
             self.assertEqual(len(labels), len(set(labels)), z)
 
     def test_the_labels_of_details_differ(self):
-        """A section of Details may go to the other column (Customize, static/js/arrange.js): the labels of both
-        columns differ, so that the editor names each one plainly."""
-        labels = [block["label"] for block in overview_blocks.zone("left") + overview_blocks.zone("right")]
+        """A section of Details may go to the other column (Customize, static/js/arrange.js): the labels of Details
+        differ, so that the editor names each one plainly."""
+        labels = [block["label"] for zone in DETAILS for block in overview_blocks.zone(zone)]
         self.assertEqual(len(labels), len(set(labels)))
 
     def test_each_template_exists_and_each_one_is_listed(self):
@@ -67,13 +72,35 @@ class Blocks(unittest.TestCase):
         self.assertEqual(folder, sorted(templates))  # none that the page would never show
 
     def test_a_block_of_details_is_a_section_named_by_its_id(self):
-        """In the two columns of Details, each block is a <details> section whose data-section is its id: the
-        browser keeps the open ones by it (static/js/overview.js)."""
-        for block in overview_blocks.zone("left") + overview_blocks.zone("right"):
+        """In Details (its two columns and its whole width), each block is a <details> section whose data-section is
+        its id: the browser keeps the open ones by it (static/js/overview.js). Its template renders the open attribute
+        from the block's flag, so that "open" in the list is enough."""
+        for block in [b for zone in DETAILS for b in overview_blocks.zone(zone)]:
             with self.subTest(block["id"]):
                 text = template(block)
                 self.assertEqual(re.findall(r'data-section="([^"]*)"', text), [block["id"]])
-                self.assertIn('<details class="card ov-section" data-section="%s">' % block["id"], text)
+                self.assertIn('<details class="card ov-section" data-section="%s"{%% if block.open %%} open'
+                              '{%% endif %%}>' % block["id"], text)
+
+    def test_only_a_section_of_details_is_open_by_default(self):
+        """The other blocks are no <details> of their own: "open" would mean nothing for them."""
+        for block in BLOCKS:
+            if block.get("open"):
+                self.assertIn(block["zone"], DETAILS, block["id"])
+
+    def test_the_zones_of_details(self):
+        """Its two columns, then its whole width: the last zones of the page."""
+        self.assertEqual(ZONES[-3:], DETAILS)
+
+    def test_the_cards_that_repeat_the_tiles_are_hidden_by_default(self):
+        """CPU Info and RAM Info mostly repeat the CPU and Memory tiles: hidden, for whoever wants their detail
+        (Customize shows them again). Disk Info is not: it shows every disk and its speeds. Top processes and Network
+        Info open across the whole width of Details."""
+        blocks = {block["id"]: block for block in BLOCKS}
+        self.assertEqual(sorted(i for i, b in blocks.items() if b.get("hidden")), ["cpu", "ram"])
+        self.assertNotIn("hidden", blocks["disks"])
+        self.assertEqual(sorted(i for i, b in blocks.items() if b.get("open")), ["network", "processes"])
+        self.assertEqual(sorted(b["id"] for b in overview_blocks.zone("wide")), ["network", "processes"])
 
     def test_the_scripts_and_stylesheets_exist_once(self):
         for files, kind in ((overview_blocks.scripts(), ".js"), (overview_blocks.stylesheets(), ".css")):

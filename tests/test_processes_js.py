@@ -1,6 +1,8 @@
 """Top processes (static/js/processes.js), run for real in Node.js on the Overview page the panel renders, in the fake
 DOM of tests/fake_dom.js, with static/js/overview.js which opens and closes the sections: when the page asks (only
-while the section is open and the tab shows), what the lists and the lines say, and that they insert text only.
+while the section is open, not hidden with Customize, and the tab shows), what the lists and the lines say, and that
+they insert text only. The section is open by default: most tests start with the browser remembering it closed
+(CLOSED), and open it when they need to.
 Skipped when node is not installed, except with REQUIRE_NODE=1 (the automatic tests).
 
 Run from the repository root: python tests/test_processes_js.py
@@ -17,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The page, the fake DOM and its runner are those of the disk banner's tests. Importing them points the panel to a
 # throwaway htpasswd file (the admin "tester", and "friend") and writes swizzin.cfg, removed at the end.
 from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin  # noqa: E402
+from core import layouts  # noqa: E402
 
 _tmp = tempfile.mkdtemp()
 swizzin.layout_choices.path = os.path.join(_tmp, "layouts.json")
@@ -77,6 +80,7 @@ def answer(data):
 
 
 OPEN = {"summary": "processes"}  # a click on the section's header: it opens, or closes
+CLOSED = {"overview.closed": "processes"}  # the browser remembers it closed (static/js/overview.js)
 
 
 @unittest.skipUnless(NODE or NODE_REQUIRED, "node is not installed")
@@ -86,10 +90,12 @@ class ProcessesTest(unittest.TestCase):
         if not NODE:
             raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
 
-    def run_page(self, steps, user="tester", storage=None, **config):
-        """The Overview of `user` with overview.js and this script, in the fake DOM: a snapshot after loading and
-        after each step."""
+    def run_page(self, steps, user="tester", storage=CLOSED, arrangement=None, **config):
+        """The Overview of `user` (with `arrangement`, as POST /layout/arrange takes it) with overview.js and this
+        script, in the fake DOM: a snapshot after loading and after each step."""
         with mock.patch.object(swizzin.layout_choices, "get", return_value="overview"), \
+                mock.patch.object(swizzin.layout_choices, "arrangement",
+                                  return_value=arrangement and layouts.checked(arrangement)), \
                 mock.patch.dict(swizzin.app.config, config):
             page = dashboard(user, ["/"], False)
         tree = Tree()
@@ -149,13 +155,39 @@ class WhenItAsks(ProcessesTest):
         self.assertIsNone(self.rows(snaps[3], "cpu"))
         self.assertEqual((snaps[3]["timers"], snaps[4]["requests"]), (0, 1))
 
-    def test_remembered_open(self):
-        """overview.js opens it as the page loads (localStorage): one request, not one more for its toggle."""
-        snaps = self.run_page([answer(ok())], storage={"overview.open": "ram,processes"})
+    def test_open_by_default_it_asks_as_the_page_loads(self):
+        """Open as the panel renders it ("open" in core/overview_blocks.py): one request at once, then every 5
+        seconds; the same when the storage is blocked, or still holds what the previous version kept (the sections
+        opened, among them this one)."""
+        for storage in (None, {}, "throws", {"overview.open": "ram,processes"}):
+            with self.subTest(storage=storage):
+                snaps = self.run_page([answer(ok()), {"timer": True}], storage=storage)
+                self.assertTrue(snaps[0]["sections"]["processes"])
+                self.assertEqual(self.asked(snaps[0]), [URL])
+                self.assertEqual(self.texts(snaps[1], "cpu")[0][0], "rtorrent main")
+                self.assertEqual(self.delays(snaps[1]), [5000])
+                self.assertEqual(self.asked(snaps[2]), [URL] * 2)
+
+    def test_remembered_closed_it_asks_nothing_until_opened(self):
+        """overview.js closes it as the page loads (localStorage "overview.closed"): no request, not even for its
+        toggle; opened again, at once, and the browser forgets that it was closed."""
+        snaps = self.run_page([{"timer": True}, OPEN, answer(ok())])
+        self.assertFalse(snaps[0]["sections"]["processes"])
+        self.assertEqual((snaps[0]["requests"], snaps[1]["requests"]), (0, 0))
+        self.assertTrue(snaps[2]["sections"]["processes"])
+        self.assertEqual(self.asked(snaps[2]), [URL])
+        self.assertEqual(snaps[2]["storage"], {"overview.closed": ""})
+
+    def test_hidden_with_customize_it_asks_nothing(self):
+        """Hidden by the account's arrangement, the section is still in the page, open by default, but nobody sees it:
+        the panel reads no process for it, whatever happens to it or to the tab."""
+        snaps = self.run_page([OPEN, OPEN, {"hidden": True}, {"hidden": False}, {"timer": True}], storage={},
+                              arrangement={"hidden": ["processes"]})
         self.assertTrue(snaps[0]["sections"]["processes"])
-        self.assertEqual(self.asked(snaps[0]), [URL])
-        self.assertEqual(self.asked(snaps[1]), [URL])
-        self.assertEqual(self.texts(snaps[1], "cpu")[0][0], "rtorrent main")
+        for snap in snaps:
+            self.assertEqual((snap["requests"], snap["timers"]), (0, 0))
+        shown = self.run_page([], storage={}, arrangement={"hidden": ["disks"]})[0]  # another block hidden: it asks
+        self.assertEqual(self.asked(shown), [URL])
 
     def test_a_hidden_tab_asks_nothing(self):
         snaps = self.run_page([OPEN, answer(ok()), {"hidden": True}, {"timer": True}, {"hidden": False},

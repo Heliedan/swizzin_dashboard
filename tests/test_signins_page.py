@@ -268,8 +268,9 @@ class Page(PanelTest):
         self.assertIn('id="ov-signins" data-url="/signins" data-logout="/logout"', page)
         self.assertEqual(page.count('src="/static/js/signins.js"'), 1)
         details = page[page.index('id="ov-details"'):]
-        self.assertLess(details.index('data-section="network"'), details.index('data-section="signins"'))
-        self.assertNotIn("<details open", page)
+        self.assertLess(details.index('data-section="disks"'), details.index('data-section="signins"'))
+        self.assertLess(details.index('data-section="signins"'), details.index('class="ov-wide"'))  # a column's
+        self.assertNotIn('data-section="signins" open', page)  # closed by default
 
     def test_nothing_for_another_account_nor_in_classic(self):
         """Another account's Overview loads the script, as every block's, and it finds nothing to fill (tested in

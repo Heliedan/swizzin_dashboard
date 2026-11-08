@@ -1,6 +1,9 @@
-{# Block "network" of core/overview_blocks.py: Network Info, a section of Details. On a shared server, or the admin. #}
+{# Block "network" of core/overview_blocks.py: Network Info, a section of Details, open by default, across its whole
+   width. On a shared server, or the admin. The card of Classic, unchanged (templates/netinfo.html, and
+   templates/top.html, which /stats/vnstat fills): static/css/network.css lays its tables out side by side when
+   Details is wide enough. #}
         {% if (config.SHAREDSERVER == True or admin) %}
-        <details class="card ov-section" data-section="network"><summary class="card-header">Network Info</summary>
+        <details class="card ov-section" data-section="network"{% if block.open %} open{% endif %}><summary class="card-header">Network Info</summary>
           {% include 'netinfo.html' %}
         </details>
         {% endif %}

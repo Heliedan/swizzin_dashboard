@@ -1,11 +1,13 @@
 /* Customize, on the Overview layout of the dashboard (templates/overview.html, see the README): each account may move
-   the blocks of the page within their zone, hide them, and put a section of Details in the other column. The panel
-   renders the page in the account's order (core/layouts.py); this script makes the editor and sends what it gives.
-   The editor is made from the blocks listed on the Customize button (data-blocks): those of this page only, in their
-   order, each with its label, its zone, its zone by default and whether it is hidden, and their default order. A
-   block added to core/overview_blocks.py is listed there like the others: nothing to write here for it.
+   the blocks of the page within their zone, hide or show them, and put a section of a column of Details in the other
+   column. The panel renders the page in the account's order (core/layouts.py); this script makes the editor and sends
+   what it gives. The editor is made from the blocks listed on the Customize button (data-blocks): those of this page
+   only, in their order, each with its label, its zone, its zone by default, whether it is hidden and whether it is
+   hidden by default, and their default order. A block added to core/overview_blocks.py is listed there like the
+   others: nothing to write here for it.
    The editor opens under the heading of At a glance: one list per zone, each block with Move earlier, Move later, Hide
-   (a toggle: aria-pressed) and, for a section of Details, a button to the other column. Nothing changes on the page
+   (a toggle: aria-pressed; a block hidden by default starts pressed) and, for a section of a column of Details, a
+   button to the other column (none for the sections across the whole width of Details). Nothing changes on the page
    before Done, which sends the arrangement (POST, JSON) and loads the page again in the new order; Cancel closes the
    editor and forgets the changes; Reset to default puts the default arrangement in the editor, for Done to keep. The
    focus stays on the button pressed, and a status region says where the block went ("CPU: position 2 of 4 in
@@ -23,7 +25,7 @@
 
   var KEY = 'overview.arranged';  // sessionStorage: "1" while the page loads again after Done
   var NAMES = { glance: 'Heading of At a glance', tiles: 'Tiles', row: 'Under the tiles',
-                left: 'Details, left column', right: 'Details, right column' };
+                left: 'Details, left column', right: 'Details, right column', wide: 'Details, full width' };
   var COLUMNS = { left: 'right', right: 'left' };  // as OTHER_COLUMN of core/layouts.py
   var heading = button.parentNode;
   var blocks = {};  // id: the block, as listed on the button
@@ -74,7 +76,8 @@
   }
 
   // Where each block is: {zone: [ids]} and the hidden ones, as listed on the button (the account's arrangement), or
-  // the default arrangement: each block in its own zone, in the order of core/overview_blocks.py, none hidden.
+  // the default arrangement: each block in its own zone, in the order of core/overview_blocks.py, those hidden by
+  // default hidden.
   function saved() {
     var where = {}, hidden = {};
     data.blocks.forEach(function (b) {
@@ -86,30 +89,34 @@
     return { where: where, hidden: hidden };
   }
   function byDefault() {
-    var where = {};
+    var where = {}, hidden = {};
     (Array.isArray(data.order) ? data.order : []).forEach(function (id) {
       if (Object.prototype.hasOwnProperty.call(blocks, id)) {
         (where[blocks[id].home] = where[blocks[id].home] || []).push(id);
+        if (blocks[id].default_hidden === true) { hidden[id] = true; }
       }
     });
-    return { where: where, hidden: {} };
+    return { where: where, hidden: hidden };
   }
 
-  // What the editor shows, as /layout/arrange takes it: every block in the order of the page, the hidden ones, and
-  // the sections in the other column than their own.
+  // What the editor shows, as /layout/arrange takes it: every block in the order of the page, what differs from the
+  // default (the blocks hidden among those shown by default, the blocks shown among those hidden by default), and the
+  // sections in the other column than their own.
   function arrangement(state) {
-    var order = [], hidden = [], other = [];
+    var order = [], hidden = [], shown = [], other = [];
     zones.forEach(function (zone) {
       var ids = state ? state.where[zone] || [] : children(lists[zone]).map(function (li) {
         return li.getAttribute('data-block');
       });
       ids.forEach(function (id) {
+        var off = state ? !!state.hidden[id] : isHidden(items[id]), offByDefault = blocks[id].default_hidden === true;
         order.push(id);
-        if (state ? state.hidden[id] : isHidden(items[id])) { hidden.push(id); }
+        if (off && !offByDefault) { hidden.push(id); }
+        if (!off && offByDefault) { shown.push(id); }
         if (zone !== blocks[id].home) { other.push(id); }
       });
     });
-    return { order: order, hidden: hidden, other_column: other };
+    return { order: order, hidden: hidden, shown: shown, other_column: other };
   }
   function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
@@ -234,7 +241,7 @@
     head.appendChild(bar);
     editor.appendChild(head);
     var body = el('div', 'card-body');
-    body.appendChild(el('p', 'ov-arrange-help', 'Move or hide the blocks of this page, for your account. ' +
+    body.appendChild(el('p', 'ov-arrange-help', 'Move, hide or show the blocks of this page, for your account. ' +
                                                 'Nothing changes on the page before Done.'));
     message = el('p', 'ov-arrange-message', '', 'ov-arrange-message');
     body.appendChild(message);

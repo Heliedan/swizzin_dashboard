@@ -163,15 +163,21 @@ class Pages(PageTest):
         self.assertEqual(r.status_code, 200)
         return r.get_data(as_text=True)
 
-    def test_a_section_of_details_after_ram_info(self):
-        """In the left column, the machine's, after RAM Info; closed, like every section."""
+    def test_a_section_across_the_whole_width_of_details(self):
+        """Under the two columns, across the whole width of Details, open by default; its two lists each in an element
+        of its own, that static/css/processes.css puts side by side when Details is wide enough."""
         page = self.page("tester")
         details = page[page.index('id="ov-details"'):]
-        found = re.findall(r'class="(live-stack|ov-column)"|data-section="([\w-]+)"', details)
-        self.assertEqual([a or b for a, b in found][:6], ["live-stack", "ov-column", "cpu", "ram", "processes",
-                                                          "ov-column"])
-        self.assertIn('<details class="card ov-section" data-section="processes"><summary class="card-header">Top '
-                      'processes</summary>', page)
+        found = [a or b for a, b in re.findall(r'class="(live-stack|ov-column|ov-wide)"|data-section="([\w-]+)"',
+                                               details)]
+        self.assertEqual(found.count("ov-column"), 2)
+        self.assertGreater(found.index("processes"), found.index("ov-wide"))
+        self.assertIn('<details class="card ov-section" data-section="processes" open><summary class="card-header">'
+                      'Top processes</summary>', page)
+        start = page.index('<div class="ov-processes-lists">')
+        lists = page[start:page.index("</details>", start)]
+        self.assertEqual(re.findall(r'<div class="ov-processes-list">\s*<h3 class="ov-processes-title" '
+                                    r'id="ov-processes-(\w+)-title">', lists), ["cpu", "memory"])
         self.assertIn('id="ov-processes" data-url="/stats/processes" data-logout="/logout"', page)
         for name in ("cpu", "memory"):
             self.assertIn('<tbody id="ov-processes-%s"></tbody>' % name, page)

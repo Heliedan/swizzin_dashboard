@@ -6,14 +6,21 @@ no disk quota...): an account that may not see a block gets nothing from it. Eac
   tiles        At a glance, the row of tiles at the top;
   row          the row under the tiles: the bandwidth graph and Service Info;
   left, right  the two columns of Details, where each block is a section: a <details> element whose data-section is
-               the block's id (the browser keeps the open ones by it). One column on a narrow screen, left first.
+               the block's id (the browser keeps the open ones by it). One column on a narrow screen, left first;
+  wide         under the two columns, the sections of Details that take its whole width (their content is laid out
+               across it when it is wide enough, in their own stylesheet).
+Two flags give a block's state by default, before an account changes it:
+  hidden       True: the block is hidden by default (it repeats what another one shows); Customize shows it again;
+  open         True: the section of Details is open by default (its template renders the open attribute from it);
+               the browser still remembers it closed when it is closed (static/js/overview.js).
 A new block is one more line here, with its script or its stylesheet if it has one (in static/): templates/index.html
 loads those of the Overview layout from here, after the layout's own (SCRIPTS, STYLESHEETS). The id stays the same
 for good; the label is the block's name for people. tests/test_overview_blocks.py checks this list.
-Each account may move, hide or (in Details) put in the other column the blocks it sees, with Customize
-(core/layouts.py, static/js/arrange.js): a new block can be arranged like the others, with nothing more to write."""
+Each account may move, hide or show, or (in a column of Details) put in the other column the blocks it sees, with
+Customize (core/layouts.py, static/js/arrange.js): a new block can be arranged like the others, with nothing more to
+write."""
 
-ZONES = ("glance", "tiles", "row", "left", "right")
+ZONES = ("glance", "tiles", "row", "left", "right", "wide")
 
 STYLESHEETS = ["css/overview.css"]
 SCRIPTS = ["js/overview.js", "js/arrange.js"]  # arrange.js: Customize, each account's order (core/layouts.py)
@@ -28,13 +35,16 @@ BLOCKS = [
     {"id": "bandwidth", "zone": "row", "template": "overview/bandwidth.html", "label": "Network"},
     {"id": "services", "zone": "row", "template": "overview/services.html", "label": "Service Info",
      "script": "js/service_logs.js"},
-    {"id": "cpu", "zone": "left", "template": "overview/cpu.html", "label": "CPU Info"},
-    {"id": "ram", "zone": "left", "template": "overview/ram.html", "label": "RAM Info"},
-    {"id": "processes", "zone": "left", "template": "overview/processes.html", "label": "Top processes",
-     "script": "js/processes.js", "stylesheet": "css/processes.css"},
+    # CPU Info and RAM Info mostly repeat the CPU and Memory tiles: hidden by default, for whoever wants their detail
+    # (each core, user, system and I/O wait, the uptime...).
+    {"id": "cpu", "zone": "left", "template": "overview/cpu.html", "label": "CPU Info", "hidden": True},
+    {"id": "ram", "zone": "left", "template": "overview/ram.html", "label": "RAM Info", "hidden": True},
+    {"id": "processes", "zone": "wide", "template": "overview/processes.html", "label": "Top processes",
+     "script": "js/processes.js", "stylesheet": "css/processes.css", "open": True},
     {"id": "disks", "zone": "right", "template": "overview/disks.html", "label": "Disk Info"},
     {"id": "quota", "zone": "right", "template": "overview/quota.html", "label": "Disk Quota Info"},
-    {"id": "network", "zone": "right", "template": "overview/network.html", "label": "Network Info"},
+    {"id": "network", "zone": "wide", "template": "overview/network.html", "label": "Network Info",
+     "stylesheet": "css/network.css", "open": True},
     {"id": "signins", "zone": "right", "template": "overview/signins.html", "label": "Panel sign-ins",
      "script": "js/signins.js"},
 ]

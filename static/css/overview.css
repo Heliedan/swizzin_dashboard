@@ -80,14 +80,20 @@
 .ov-period-value > span { white-space: nowrap; }
 .ov-periods-note { margin: 0.5rem 0 0; font-size: 0.8125rem; color: #b0b0b0; }
 
-/* Details: the Classic cards, each in a section closed by default. The summary is the section's header (the arrow
-   turns when it is open); the card inside loses its own header and frame. */
-/* Two columns from 1200 px wide (each about 450 px or more next to the sidebar, enough for the tables of Network
-   Info); each column stacks its sections on its own, so that opening one moves nothing in the other column. */
+/* Details: the Classic cards and a few more, each in a section, closed unless open by default ("open" in
+   core/overview_blocks.py). The summary is the section's header (the arrow turns when it is open); the card inside
+   loses its own header and frame. */
+/* Two columns from 1200 px wide (each about 450 px or more next to the sidebar); each column stacks its sections on
+   its own, so that opening one moves nothing in the other column. */
 @media (min-width: 1200px) {
   .ov-block > .live-stack { display: flex; align-items: flex-start; gap: 16px; }
   .ov-block > .live-stack > .ov-column { flex: 1 1 0; min-width: 0; }
 }
+/* Then the sections that take the whole width of Details (zone "wide"), one under the other. The zone is a container:
+   the stylesheet of each section (static/css/processes.css, static/css/network.css) lays its content out by the width
+   it really has, the sidebar shown or not; a browser without container queries (Safari before 16) keeps it one part
+   under the other, as on a phone. */
+.ov-wide { container: ov-wide / inline-size; }
 .ov-section { margin-bottom: 8px; }
 .ov-section > summary { display: flex; justify-content: space-between; align-items: center; min-height: 48px;
   cursor: pointer; list-style: none; border-bottom: 0; }

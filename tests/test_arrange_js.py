@@ -58,7 +58,8 @@ ATTRS = [["ov-customize", "hidden"], ["ov-customize", "aria-expanded"], ["ov-cus
 # after them, in each zone: the tests work out where from what the page lists on its Customize button.
 ARRANGED = {"order": ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "disks", "cpu", "ram",
                       "network"],
-            "hidden": ["ram", "tile-disk"], "other_column": ["disks"]}
+            "hidden": ["tile-disk"], "shown": ["ram"], "other_column": ["disks"]}
+BY_DEFAULT = [block["id"] for block in overview_blocks.BLOCKS if block.get("hidden")]  # hidden by default
 EXTRA = {"id": "extra", "zone": "right", "template": "overview/extra.html", "label": "Extra <b>block</b>"}
 EXTRA_HTML = ('<details class="card ov-section" data-section="extra"><summary class="card-header">Extra</summary>'
               '</details>')
@@ -180,7 +181,7 @@ class ArrangeJs(unittest.TestCase):
         self.assertEqual(self.lists(opened), expected)
         self.assertEqual(sorted(flat(expected)), sorted(b["id"] for b in self.data["blocks"]))  # each block once
         # The blocks added to core/overview_blocks.py after Customize are listed like the others.
-        self.assertIn("processes", expected["left"])
+        self.assertIn("processes", expected["wide"])
         self.assertIn("signins", expected["right"])
         # Alone in its zone, the pills only hide; the tiles move too. The "Hidden" tag is there, hidden.
         self.assertEqual(opened["watch"][line("system-status")], "Reboot and updatesHiddenHide")
@@ -269,15 +270,18 @@ class ArrangeJs(unittest.TestCase):
         self.assertEqual(back["focus"], line("disks") + "-column")
 
     def test_done_sends_the_arrangement_and_loads_the_page_again(self):
+        """What differs from the default: the blocks hidden among those shown by default (Disk /), the blocks shown
+        among those hidden by default (RAM Info), the sections in the other column."""
         expected = self.expected()
         first = expected["tiles"][0]
-        steps = [{"press": "ov-customize"}, press(first, "later"), press("ram", "hide"), press("disks", "column"),
-                 {"press": "ov-arrange-done"}, {"ajax": {"arrangement": {}}}]
+        steps = [{"press": "ov-customize"}, press(first, "later"), press("tile-disk", "hide"), press("ram", "hide"),
+                 press("disks", "column"), {"press": "ov-arrange-done"}, {"ajax": {"arrangement": {}}}]
         snaps = self.run_page(steps)
         sent, saved = snaps[-2], snaps[-1]
         after = dict(expected, tiles=moved(expected["tiles"], first, 1), left=expected["left"] + ["disks"],
                      right=without(expected["right"], "disks"))
-        body = {"order": flat(after), "hidden": ["ram"], "other_column": ["disks"]}
+        self.assertIn("ram", BY_DEFAULT)
+        body = {"order": flat(after), "hidden": ["tile-disk"], "shown": ["ram"], "other_column": ["disks"]}
         self.assertEqual(len(sent["sent"]), 1)
         self.assertEqual(dict(sent["sent"][0], data=json.loads(sent["sent"][0]["data"])),
                          {"type": "POST", "url": "/layout/arrange", "data": body, "contentType": "application/json"})
@@ -333,7 +337,8 @@ class ArrangeJs(unittest.TestCase):
         self.assertEqual(cancelled["watch"]["ov-arrange-status"], "Changes discarded.")
         self.assertEqual((cancelled["sent"], cancelled["reloads"]), ([], 0))
         self.assertEqual(self.lists(reopened), expected)
-        self.assertEqual(self.attr(reopened, line("ram") + "-hide", "aria-pressed"), "false")
+        self.assertEqual(self.attr(reopened, line("ram") + "-hide", "aria-pressed"),
+                         "true" if "ram" in BY_DEFAULT else "false")  # as on the page
 
     def test_customize_again_closes_the_editor_as_cancel_does(self):
         opened, closed = self.run_page([{"press": "ov-customize"}, {"press": "ov-customize"}])[1:]
@@ -361,16 +366,17 @@ class ArrangeJs(unittest.TestCase):
         self.assertEqual(found, expected)
         for zone, listed in (("tiles", ["tile-ram", "tile-cpu", "tile-net", "tile-disk"]),
                              ("row", ["services", "bandwidth"]), ("left", ["disks", "cpu", "ram"]),
-                             ("right", ["network"])):
+                             ("right", []), ("wide", ["network"])):
             with self.subTest(zone):
                 self.assertEqual(found[zone][:len(listed)], listed)
                 self.assertEqual(found[zone][len(listed):], [b["id"] for b in overview_blocks.zone(zone)
                                                              if b["id"] not in ARRANGED["order"]
                                                              and b["id"] in flat(found)])
-        self.assertIn("processes", found["left"][3:])
-        self.assertIn("signins", found["right"][1:])
+        self.assertIn("processes", found["wide"][1:])
+        self.assertIn("signins", found["right"])
+        # RAM Info shown by the account, Disk / hidden by it, CPU Info hidden by default.
         self.assertEqual([self.attr(opened, line(b) + "-hide", "aria-pressed") for b in ("ram", "tile-disk", "cpu")],
-                         ["true", "true", "false"])
+                         ["false", "true", "true"])
 
     def test_reset_to_default_then_done(self):
         """Reset puts the default arrangement in the editor only: that of the page without an arrangement. Done then
@@ -383,7 +389,9 @@ class ArrangeJs(unittest.TestCase):
         self.assertNotEqual(self.lists(opened), plain)
         self.assertEqual(self.lists(reset), plain)
         self.assertEqual(self.lists(reset), lists_of(self.data, default=True))
-        self.assertEqual(self.attr(reset, line("ram") + "-hide", "aria-pressed"), "false")
+        self.assertEqual(self.attr(opened, line("ram") + "-hide", "aria-pressed"), "false")  # shown by the account
+        self.assertEqual(self.attr(reset, line("ram") + "-hide", "aria-pressed"),
+                         "true" if "ram" in BY_DEFAULT else "false")  # hidden again if it is so by default
         self.assertEqual(reset["focus"], "ov-arrange-reset")
         self.assertEqual(reset["watch"]["ov-arrange-status"], "Default arrangement in the editor: Done keeps it.")
         self.assertEqual(reset["sent"], [])
@@ -422,12 +430,13 @@ class ArrangeJs(unittest.TestCase):
         for block in ("system-status", "tile-net", "bandwidth", "signins"):
             self.assertIn(block, admin)
             self.assertNotIn(block, flat(expected))
-        self.assertIn("processes", expected["left"])
+        self.assertIn("processes", expected["wide"])
         steps = [{"press": "ov-customize"}, press("tile-disk", "earlier"), {"press": "ov-arrange-done"}]
         opened, there, sent = self.run_page(steps, user="friend")[1:]
         self.assertEqual(self.lists(opened), expected)
         after = dict(expected, tiles=moved(expected["tiles"], "tile-disk", -1))
-        self.assertEqual(json.loads(sent["sent"][0]["data"]), {"order": flat(after), "hidden": [], "other_column": []})
+        self.assertEqual(json.loads(sent["sent"][0]["data"]),
+                         {"order": flat(after), "hidden": [], "shown": [], "other_column": []})
 
     def test_a_block_added_to_the_list_is_in_the_editor(self):
         """Nothing in arrange.js names a block: a new one is listed, moved and sent like the others, and its label
@@ -450,6 +459,46 @@ class ArrangeJs(unittest.TestCase):
         after = dict(expected, left=left[:-1] + ["extra", left[-1]], right=without(expected["right"], "extra"))
         data = json.loads(sent["sent"][0]["data"])
         self.assertEqual((data["order"], data["hidden"], data["other_column"]), (flat(after), [], ["extra"]))
+
+
+    def test_a_block_hidden_by_default_starts_hidden_and_shows(self):
+        """Its Hide button pressed and its "Hidden" tag shown, as on the page; pressed again, the block shows, and Done
+        sends it in "shown" (nothing else changed). Hidden again, nothing is left to send."""
+        first = BY_DEFAULT[0]
+        self.expected()
+        name = self.label[first]
+        attrs = [(line(first) + "-hide", "aria-pressed"), (line(first), "data-hidden")]
+        opened, shown, done = self.run_page([{"press": "ov-customize"}, press(first, "hide"),
+                                             {"press": "ov-arrange-done"}], attrs=attrs)[1:]
+        self.assertEqual(self.attr(opened, line(first) + "-hide", "aria-pressed"), "true")
+        self.assertEqual(self.attr(opened, line(first), "data-hidden"), "")
+        self.assertEqual(self.attr(shown, line(first) + "-hide", "aria-pressed"), "false")
+        self.assertEqual(shown["watch"]["ov-arrange-status"], "%s: shown." % name)
+        body = json.loads(done["sent"][0]["data"])
+        self.assertEqual((body["hidden"], body["shown"], body["other_column"]), ([], [first], []))
+        self.assertEqual(layouts.checked(body), body)  # the panel keeps it as it is
+        again = self.run_page([{"press": "ov-customize"}, press(first, "hide"), press(first, "hide"),
+                               {"press": "ov-arrange-done"}])[-1]
+        self.assertEqual((again["sent"], again["watch"]["ov-arrange-status"]), ([], "Nothing changed."))
+
+    def test_the_sections_across_the_whole_width(self):
+        """Their own list, "Details, full width": they move within it and hide, but have no button to a column."""
+        expected = self.expected()
+        wide = expected["wide"]
+        self.assertGreater(len(wide), 1)
+        first = wide[0]
+        snaps = self.run_page([{"press": "ov-customize"}, press(first, "later")],
+                              watch=[line(first), "ov-arrange-zone-wide"])
+        opened, moved_ = snaps[1], snaps[2]
+        self.assertEqual(opened["watch"]["ov-arrange-zone-wide"], "Details, full width")
+        self.assertEqual(opened["watch"][line(first)], self.label[first] + "Hidden↑↓Hide")  # no "To the left"
+        self.assertEqual(self.lists(moved_)["wide"], moved(wide, first, 1))
+        self.assertEqual(moved_["watch"]["ov-arrange-status"],
+                         "%s: position 2 of %d in Details, full width." % (self.label[first], len(wide)))
+        sent = self.run_page([{"press": "ov-customize"}, press(first, "later"), {"press": "ov-arrange-done"}])[-1]
+        body = json.loads(sent["sent"][0]["data"])
+        self.assertEqual(body["other_column"], [])
+        self.assertEqual([i for i in body["order"] if i in wide], moved(wide, first, 1))
 
 
 if __name__ == "__main__":

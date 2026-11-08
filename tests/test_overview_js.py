@@ -24,9 +24,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin  # noqa: E402
 from test_live_graphs_js import T0, find, line, speed  # noqa: E402
 from fake_vnstat import EMPTY, FakeVnstat, vnstat_json  # noqa: E402
+from core import overview_blocks  # noqa: E402
 
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"tester:tester").decode()}
-STORE_KEY = "overview.open"  # the localStorage key of the open sections
+STORE_KEY = "overview.open"  # localStorage: the sections opened, among those closed by default
+CLOSED_KEY = "overview.closed"  # localStorage: the sections closed, among those open by default
+OPEN_BY_DEFAULT = {block["id"] for block in overview_blocks.BLOCKS if block.get("open")}
 TILES = ("cpu", "ram", "disk", "net")
 SPARKS = ("cpu-spark", "ram-spark", "disk-spark", "net-spark")
 OVERVIEW_SCRIPTS = ("live_graphs.js", "live_stats.js", "overview.js")
@@ -373,41 +376,85 @@ class TileScales(OverviewTest):
 
 
 class Sections(OverviewTest):
-    """The cards of the Classic layout, in sections closed by default, remembered open by the browser."""
+    """The sections of Details: open or closed as core/overview_blocks.py says ("open": those across the whole width),
+    unless the browser remembers otherwise: "overview.open", the sections opened among those closed by default,
+    "overview.closed", those closed among those open by default."""
 
-    ALL = {"cpu": False, "ram": False, "disks": False, "network": False}
+    def defaults(self, snap, opened=(), closed=()):
+        """{section: open} for the sections of `snap`: as by default, but those `opened` and `closed`."""
+        return {k: (k in OPEN_BY_DEFAULT or k in opened) and k not in closed for k in snap["sections"]}
 
-    def cards(self, snap):
-        """The sections of the cards of Classic in `snap`, open or not: other blocks of Details test their own."""
-        return {k: v for k, v in snap["sections"].items() if k in ("cpu", "ram", "disks", "quota", "network")}
+    def wide(self, snap):
+        """The sections of `snap` open by default, in the order of the page."""
+        return [k for k in snap["sections"] if k in OPEN_BY_DEFAULT]
 
-    def test_closed_when_the_page_loads(self):
-        self.assertEqual(self.cards(self.run_page([], storage={})[0]), self.ALL)
+    def test_as_by_default_when_the_page_loads(self):
+        loaded = self.run_page([], storage={})[0]
+        self.assertEqual(loaded["sections"], self.defaults(loaded))
+        self.assertEqual(sorted(self.wide(loaded)), sorted(OPEN_BY_DEFAULT))  # each one in the admin's page
+        self.assertIn(False, loaded["sections"].values())
+        self.assertEqual(loaded["storage"], {})  # nothing written
 
     def test_a_click_opens_a_section_and_the_browser_remembers_it(self):
         snaps = self.run_page([{"summary": "cpu"}, {"summary": "disks"}, {"summary": "cpu"}], storage={})
-        self.assertEqual([self.cards(s) for s in snaps[1:]],
-                         [dict(self.ALL, cpu=True), dict(self.ALL, cpu=True, disks=True), dict(self.ALL, disks=True)])
+        self.assertEqual([s["sections"] for s in snaps[1:]],
+                         [self.defaults(snaps[0], ["cpu"]), self.defaults(snaps[0], ["cpu", "disks"]),
+                          self.defaults(snaps[0], ["disks"])])
         self.assertEqual([s["storage"] for s in snaps], [{}, {STORE_KEY: "cpu"}, {STORE_KEY: "cpu,disks"},
-                                                         {STORE_KEY: "disks"}])
+                                                         {STORE_KEY: "disks"}])  # "overview.closed" never written
 
-    def test_the_sections_remembered_open_are_open_when_the_page_loads(self):
-        for stored, opened in (("disks,network", {"disks", "network"}), ("nonsense,cpu,", {"cpu"}), ("", set())):
-            with self.subTest(stored):
-                loaded = self.run_page([], storage={STORE_KEY: stored})[0]
-                self.assertEqual({k for k, v in self.cards(loaded).items() if v}, opened)
+    def test_a_click_closes_a_section_open_by_default_and_the_browser_remembers_it(self):
+        """Each one closed, the last first, then the first opened again: "overview.closed" lists those closed, in the
+        order of the page; "overview.open" is never written. The page loaded again shows them as they were left."""
+        wide = self.wide(self.run_page([], storage={})[0])
+        steps = [{"summary": name} for name in wide[::-1]] + [{"summary": wide[0]}]
+        snaps = self.run_page(steps, storage={})
+        closed = [wide[len(wide) - n:] for n in range(1, len(wide) + 1)] + [wide[1:]]
+        self.assertEqual([s["sections"] for s in snaps[1:]], [self.defaults(snaps[0], closed=c) for c in closed])
+        self.assertEqual([s["storage"] for s in snaps[1:]], [{CLOSED_KEY: ",".join(c)} for c in closed])
+        loaded = self.run_page([], storage=snaps[-2]["storage"])[0]  # the page loads again, all of them closed
+        self.assertEqual(loaded["sections"], snaps[-2]["sections"])
 
-    def test_without_a_usable_storage_they_start_closed_and_still_open(self):
+    def test_the_sections_remembered_are_as_remembered_when_the_page_loads(self):
+        """What the previous version kept (the sections open, each one) reads as it was: a section open by default in
+        it changes nothing. What cannot be a section is left out. When a section changes as the page loads, its
+        "toggle" writes the keys again, with only what differs from the default, and only the keys that change."""
+        wide = sorted(OPEN_BY_DEFAULT)[0]
+        for storage, opened, closed, after in (
+                ({STORE_KEY: "disks," + wide}, ["disks"], [], {STORE_KEY: "disks"}),
+                ({STORE_KEY: "nonsense,cpu,"}, ["cpu"], [], {STORE_KEY: "cpu"}),
+                ({STORE_KEY: ""}, [], [], {STORE_KEY: ""}),
+                ({CLOSED_KEY: wide}, [], [wide], {CLOSED_KEY: wide}),
+                ({CLOSED_KEY: "disks,nonsense"}, [], [], {CLOSED_KEY: "disks,nonsense"}),  # nothing changes
+                ({STORE_KEY: "cpu", CLOSED_KEY: wide + ",,"}, ["cpu"], [wide], {STORE_KEY: "cpu", CLOSED_KEY: wide})):
+            with self.subTest(storage):
+                loaded = self.run_page([], storage=storage)[0]
+                self.assertEqual(loaded["sections"], self.defaults(loaded, opened, closed))
+                self.assertEqual(loaded["storage"], after)
+
+    def test_each_key_is_written_only_when_it_changes(self):
+        """A click writes what changed: the key of the previous version loses a section open by default."""
+        wide = sorted(OPEN_BY_DEFAULT)[0]
+        clicked = self.run_page([{"summary": "cpu"}], storage={STORE_KEY: wide + ",disks"})[1]
+        self.assertEqual(clicked["storage"], {STORE_KEY: "cpu,disks"})
+        self.assertEqual(clicked["sections"], self.defaults(clicked, ["cpu", "disks"]))
+
+    def test_without_a_usable_storage_as_by_default_and_still_open_and_close(self):
+        wide = sorted(OPEN_BY_DEFAULT)[0]
         for storage in (None, "throws", "full"):
             with self.subTest(storage=storage):
-                loaded, clicked = self.run_page([{"summary": "ram"}], storage=storage)
-                self.assertEqual(self.cards(loaded), self.ALL)
-                self.assertEqual(self.cards(clicked), dict(self.ALL, ram=True))
+                loaded, opened, closed = self.run_page([{"summary": "ram"}, {"summary": wide}], storage=storage)
+                self.assertEqual(loaded["sections"], self.defaults(loaded))
+                self.assertEqual(opened["sections"], self.defaults(loaded, ["ram"]))
+                self.assertEqual(closed["sections"], self.defaults(loaded, ["ram"], [wide]))
 
     def test_the_sections_follow_the_rights_of_the_cards(self):
-        self.assertEqual(self.cards(self.run_page([], user="friend")[0]), {"cpu": False, "ram": False, "disks": False})
-        self.assertEqual(self.cards(self.run_page([], user="friend", quota=True)[0]),
-                         {"cpu": False, "ram": False, "quota": False})
+        cards = ("cpu", "ram", "disks", "quota", "network")  # the cards of Classic; other blocks test their own
+        for quota, expected in ((False, {"cpu": False, "ram": False, "disks": False}),
+                                (True, {"cpu": False, "ram": False, "quota": False})):
+            with self.subTest(quota=quota):
+                loaded = self.run_page([], user="friend", quota=quota)[0]
+                self.assertEqual({k: v for k, v in loaded["sections"].items() if k in cards}, expected)
 
 
 class Totals(OverviewTest):

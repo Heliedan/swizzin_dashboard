@@ -1,20 +1,23 @@
 {# The Overview layout of the dashboard, chosen in the account menu (see the README); templates/index.html shows it in
    place of the Classic cards. At a glance: four tiles (CPU, Memory, Disk /, Network), each with its level in words and
-   its last 5 minutes. Then the bandwidth graph with the totals of vnstat, next to the services; then every card of the
-   Classic layout, in sections closed by default.
-   Same data, same rights, same element ids and the same scripts as Classic: nothing new is asked of the server. The
-   tiles are filled by static/js/live_stats.js, their small graphs by static/js/live_graphs.js, the totals and the
-   sections by static/js/overview.js; the look is in static/css/overview.css.
-   The blocks of each zone (the tiles, the row under them, the two columns of Details) are listed in
-   core/overview_blocks.py, each with its template in templates/overview/, which may use the macros and the variables
-   set here (admin, disk_card).
+   its last 5 minutes. Then the bandwidth graph with the totals of vnstat, next to the services; then Details: the
+   cards of the Classic layout and a few more, each in a section, closed by default unless core/overview_blocks.py
+   says "open" (Top processes and Network Info, across the whole width of Details); CPU Info and RAM Info are hidden
+   by default (they repeat the CPU and Memory tiles).
+   Same data, same rights, same element ids and the same scripts as Classic. The tiles are filled by
+   static/js/live_stats.js, their small graphs by static/js/live_graphs.js, the totals and the sections by
+   static/js/overview.js; the look is in static/css/overview.css.
+   The blocks of each zone (the tiles, the row under them, the two columns of Details and its whole width) are listed
+   in core/overview_blocks.py, each with its template in templates/overview/, which may use the macros and the
+   variables set here (admin, disk_card) and the block itself (block.open).
    Each account may arrange them with Customize (static/js/arrange.js, core/layouts.py): overview_zones gives the blocks
-   of each zone in the account's order, each with whether it is hidden. Each block is rendered first, here, to know
-   the ones this account gets (a template that renders nothing, such as a block of the admin for another account,
-   is left out, whatever the arrangement says), then put in its place: as it is, or in an element with the hidden
-   attribute, so that the scripts that read it keep working. A column of Details with nothing to show is hidden, so
-   that the other one takes the whole width. The editor of Customize is made by static/js/arrange.js from the blocks
-   listed on its button, those of this page only. #}
+   of each zone in the account's order, each with whether it is hidden (by the account, or by default). Each block is
+   rendered first, here, to know the ones this account gets (a template that renders nothing, such as a block of the
+   admin for another account, is left out, whatever the arrangement says), then put in its place: as it is, or in an
+   element with the hidden attribute, so that the scripts that read it keep working. A column of Details with nothing
+   to show is hidden, so that the other one takes the whole width; so is the zone of the whole width when it has
+   nothing to show. The editor of Customize is made by static/js/arrange.js from the blocks listed on its button,
+   those of this page only. #}
 {% from 'live_graph.html' import live_graph, bandwidth_graph %}
 {% set admin = config.ADMIN_USER == user %}
 {% set disk_card = (quota == False or admin) %}
@@ -29,7 +32,7 @@
   {%- set _ = rendered.update({block.id: html}) %}
   {%- if html|trim %}
     {%- set _ = shown.update({block.id: true}) %}{% if not hidden %}{% set _ = visible.update({zone: true}) %}{% endif %}
-    {%- set _ = editor.blocks.append({"id": block.id, "label": block.label, "zone": zone, "home": block.zone, "hidden": hidden}) %}
+    {%- set _ = editor.blocks.append({"id": block.id, "label": block.label, "zone": zone, "home": block.zone, "hidden": hidden, "default_hidden": block.hidden is true}) %}
   {%- endif %}
 {%- endfor %}{% endfor %}
 {%- for block in overview_blocks.BLOCKS if block.id in shown %}{% set _ = editor.order.append(block.id) %}{% endfor %}
@@ -59,15 +62,18 @@
     {%- for block, hidden in overview_zones['row'] %}{{ place(block, hidden) }}{% endfor %}
   </div>
 
-  {# The cards of the Classic layout, unchanged: each one in a <details> element, which the keyboard and screen readers
-     know, closed unless this browser remembers it open (static/js/overview.js). Its own header gives way to the
-     section's. On a wide screen, two columns that stack on their own: the machine (CPU, RAM) on the left, the disks
-     and the network on the right, so that a section opened in one column moves nothing in the other; one column, in
-     the same order, on a narrower screen. live-stack: where static/js/live_stats.js reads the address of the panel. #}
+  {# Details: the cards of the Classic layout, unchanged, and a few more, each one in a <details> element, which the
+     keyboard and screen readers know, open or closed as core/overview_blocks.py says, unless this browser remembers it
+     otherwise (static/js/overview.js). A card's own header gives way to the section's. On a wide screen, two columns
+     that stack on their own: the machine on the left, the disks on the right, so that a section opened in one column
+     moves nothing in the other; one column, in the same order, on a narrower screen. Then the sections that take the
+     whole width (zone "wide": Top processes, Network Info), their content laid out across it when it is wide enough
+     (static/css/processes.css, static/css/network.css). live-stack: where static/js/live_stats.js reads the address of
+     the panel. #}
   <section class="ov-block" aria-labelledby="ov-details">
     <div class="ov-heading">
       <h2 class="ov-title" id="ov-details">Details</h2>
-      <span class="ov-hint">The cards of the Classic layout</span>
+      <span class="ov-hint">More about the server</span>
     </div>
     <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
       {%- for column in ('left', 'right') %}
@@ -75,6 +81,9 @@
         {%- for block, hidden in overview_zones[column] %}{{ place(block, hidden) }}{% endfor %}
       </div>
       {%- endfor %}
+    </div>
+    <div class="ov-wide"{% if not visible['wide'] %} hidden{% endif %}>
+      {%- for block, hidden in overview_zones['wide'] %}{{ place(block, hidden) }}{% endfor %}
     </div>
   </section>
 </div>

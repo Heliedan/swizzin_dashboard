@@ -241,28 +241,42 @@ class Pages(LayoutTest):
         self.assertInOrder(["cpu", "ram", "disks", "network"], re.findall(r'data-section="([\w-]+)"', page))
         self.assertIn('<details class="card ov-section" data-section="cpu"><summary class="card-header">CPU Info'
                       '</summary>', page)
-        self.assertNotIn("<details open", page)
+        # Open as the list says: the sections open by default, and only them.
+        sections = re.findall(r'<details class="card ov-section" data-section="([\w-]+)"( open)?>', page)
+        opened = {block["id"] for block in overview_blocks.BLOCKS if block.get("open")}
+        self.assertTrue(opened)
+        self.assertEqual([i for i, open_ in sections if open_], [i for i, _ in sections if i in opened])
         for name in overview_blocks.stylesheets() + overview_blocks.scripts():  # the layout's own, and its blocks'
             self.assertEqual(page.count('="/static/%s"' % name), 1, name)
         files = re.findall(r'(?:src|href)="/static/((?:css|js)/[\w-]+\.(?:css|js))"', page)
         self.assertInOrder(["css/overview.css", "js/swizzin.js", "js/live_graphs.js", "js/live_stats.js",
                             "js/overview.js"], files)
 
-    def test_the_details_in_two_columns(self):
+    def test_the_details_in_two_columns_then_across(self):
         """Two columns on a wide screen (static/css/overview.css), each stacking on its own: the machine on the left, the
-        disks and the network on the right. In one column, on a narrow screen, the same order as Classic's cards."""
+        disks on the right. In one column, on a narrow screen, the same order as Classic's cards. Then the sections
+        across the whole width of Details (Top processes, Network Info). A column whose blocks are all hidden by
+        default (the machine's: they repeat the tiles) is hidden, and the other one takes the width."""
         page = self.overview("tester", quota=True)
-        found = re.findall(r'class="(live-stack|ov-column)"|data-section="([\w-]+)"',
-                           page[page.index('id="ov-details"'):])
-        self.assertInOrder(["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "network"],
-                           [a or b for a, b in found])
+        details = page[page.index('id="ov-details"'):]
+        self.assertIn('<h2 class="ov-title" id="ov-details">Details</h2>\n      <span class="ov-hint">More about the '
+                      'server</span>', page)
+        found = re.findall(r'class="(live-stack|ov-column|ov-wide)"( hidden)?|data-section="([\w-]+)"', details)
+        self.assertInOrder(["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "ov-wide",
+                            "processes", "network"], [a or c for a, _, c in found])
+        wide = [b["id"] for b in overview_blocks.zone("wide")]
+        self.assertEqual([c for a, _, c in found][[a for a, _, c in found].index("ov-wide"):][1:], wide)
+        boxes = [f for f in found if f[0] in ("ov-column", "ov-wide")]
+        hidden = {a + str(n): bool(h) for n, (a, h, _) in enumerate(boxes)}
+        everything_hidden = all(b.get("hidden") for b in overview_blocks.zone("left"))
+        self.assertEqual(hidden, {"ov-column0": everything_hidden, "ov-column1": False, "ov-wide2": False})
 
     def test_the_page_follows_the_list_of_blocks(self):
         """core/overview_blocks.py makes the page: a block moved in the list, or to another zone, moves on the page;
         the script and the stylesheet of a block are loaded after the layout's own, on Overview only."""
         blocks = {block["id"]: dict(block) for block in overview_blocks.BLOCKS}
         blocks["quota"]["zone"] = "left"
-        blocks["network"].update(script="js/network-block.js", stylesheet="css/network-block.css")
+        blocks["network"].update(zone="right", script="js/network-block.js", stylesheet="css/network-block.css")
         order = ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "ram", "quota", "cpu",
                  "network", "disks"]
         with mock.patch.object(overview_blocks, "BLOCKS", [blocks[i] for i in order]):
@@ -272,6 +286,7 @@ class Pages(LayoutTest):
             self.assertEqual([next(x for x in f if x) for f in found],
                              ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "Service Info", "ov-network",
                               "ov-column", "ram", "quota", "cpu", "ov-column", "network", "disks"])
+            self.assertIn('<div class="ov-wide" hidden>', page)  # nothing left across the whole width
             files = re.findall(r'(?:src|href)="/static/((?:css|js)/[\w-]+\.(?:css|js))"', page)
             self.assertInOrder(["css/live_stats.css", "css/overview.css", "css/network-block.css", "js/live_stats.js",
                                 "js/overview.js", "js/network-block.js"], files)

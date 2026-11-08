@@ -1,14 +1,18 @@
-{# Block "processes" of core/overview_blocks.py: Top processes, a section of Details (TOP_PROCESSES in swizzin.cfg). The
-   programs that use the most CPU and the most memory, by their name only: every program for the admin, their own for
-   another account (core/processes.py). static/js/processes.js fills the lists from /stats/processes, every 5 seconds
-   while the section is open, and asks nothing while it is closed. The bars repeat the number next to them. #}
+{# Block "processes" of core/overview_blocks.py: Top processes, a section of Details (TOP_PROCESSES in swizzin.cfg),
+   open by default, across the whole width of Details. The programs that use the most CPU and the most memory, by their
+   name only: every program for the admin, their own for another account (core/processes.py). static/js/processes.js
+   fills the lists from /stats/processes, every 5 seconds while the section is open, and asks nothing while it is
+   closed or hidden. The two lists side by side when Details is wide enough (static/css/processes.css). The bars
+   repeat the number next to them. #}
         {% if config.TOP_PROCESSES %}
-        <details class="card ov-section" data-section="processes"><summary class="card-header">Top processes</summary>
+        <details class="card ov-section" data-section="processes"{% if block.open %} open{% endif %}><summary class="card-header">Top processes</summary>
           <div class="card-body ov-processes" id="ov-processes" data-url="{{ url_for('processes.processes') }}" data-logout="{{ url_for('logout') }}">
             <p class="ov-processes-about">{% if admin %}The programs of every account{% else %}Your programs{% endif %}, by their name, updated every 5 seconds while this section is open.</p>
             <p class="ov-processes-about" id="ov-processes-info"></p>
             <p class="ov-processes-message" id="ov-processes-message" role="status"></p>
+            <div class="ov-processes-lists">
             {%- for list, title in (("cpu", "By CPU"), ("memory", "By memory")) %}
+            <div class="ov-processes-list">
             <h3 class="ov-processes-title" id="ov-processes-{{ list }}-title">{{ title }}</h3>
             <table class="table table-sm ov-processes-table" id="ov-processes-{{ list }}-table" aria-labelledby="ov-processes-{{ list }}-title" hidden>
               <thead><tr>
@@ -19,7 +23,9 @@
               <tbody id="ov-processes-{{ list }}"></tbody>
             </table>
             <p class="ov-processes-empty" id="ov-processes-{{ list }}-empty" hidden></p>
+            </div>
             {%- endfor %}
+            </div>
           </div>
         </details>
         {% endif %}
