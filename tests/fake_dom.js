@@ -1,8 +1,8 @@
 'use strict';
 /* A small fake DOM to run the dashboard's live scripts (static/js/live_graphs.js, static/js/live_stats.js), the
-   Overview layout's (static/js/overview.js), the layout menu of static/js/swizzin.js, and the dashboard's polls in
-   Node.js, with no npm package. Driven by tests/test_disk_alert_js.py, tests/test_bandwidth_js.py,
-   tests/test_live_graphs_js.py and tests/test_overview_js.py, which send on stdin, as JSON:
+   Overview layout's (static/js/overview.js, static/js/arrange.js), the layout menu of static/js/swizzin.js, and the
+   dashboard's polls in Node.js, with no npm package. Driven by tests/test_disk_alert_js.py, tests/test_bandwidth_js.py,
+   tests/test_live_graphs_js.py, tests/test_overview_js.py and tests/test_arrange_js.py, which send on stdin, as JSON:
      page       the HTML the panel rendered, as a tree: {tag, attrs, children} or {text}
      scripts    the paths of the scripts to run, in the order of the page
      poll       the source of a poll found in the page (diskusage(), vnstat_top10()), or null
@@ -11,6 +11,8 @@
      attrs      [id, attribute] pairs whose value the snapshots give (optional)
      storage    the browser's localStorage: absent (none), {key: value} (works, starts with these), "throws" (blocked:
                 any use throws), "full" (reads find nothing, writes throw)
+     session    the browser's sessionStorage, the same way (optional)
+     children   ids of elements whose children the snapshots list, by their ids (optional)
      steps      a list of steps, each one of:
                 {live: disks}           a live reading with these disks only
                 {event: name, data: d}  any websocket event ("speed", "live"...); "disconnect" takes no data
@@ -21,6 +23,7 @@
                 {scroll: [id, top]}     the user scrolling an element
                 {hidden: true|false}    the browser tab hidden or shown again ("visibilitychange")
                 {click: id}             a click on that element (a disabled button gets none, as in a browser)
+                {press: id}             the keyboard: the focus on that element, then Enter (a click)
                 {clickOn: selector}     a click on the first element that matches a simple selector
                 {summary: name}         a click on the <summary> of <details data-section="name">: it opens or closes
                 {batch: [steps]}        several steps, with one snapshot after the last one
@@ -32,7 +35,11 @@
    the run: the live graphs report their own errors there instead of throwing.
    As in a browser, a <details> element fires "toggle" when it opens or closes, and a MutationObserver is told about
    the children added to or removed from what it observes, both once the script that changed them has run: here, at
-   the end of the loading and of each step. */
+   the end of the loading and of each step.
+   The focus, as in a browser: focus() gives it to an element of the page that can have it (a button, a link, a form
+   field, a summary, or an element with a tabindex; not a disabled one), unless it or a parent is hidden; an element that leaves the page
+   (moved elsewhere included) or gets hidden, itself or a parent, takes the focus away with it, to nothing (the
+   page's body). The snapshots say which element has it (its id). */
 const fs = require('fs');
 const vm = require('vm');
 
@@ -40,6 +47,8 @@ let changes = [];  // every change made to the page during the current step: the
 let mutated = new Set();  // the elements whose children changed, for the MutationObservers
 let toggled = [];  // the <details> opened or closed, whose "toggle" event is due
 let added = [];  // every node added during the current step, as it was when added: {parent, cls, text}
+let active = null;  // the element that has the focus (document.activeElement), null for the page's body
+const FOCUSABLE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY']);
 
 class Text {
   constructor(value) { this.nodeType = 3; this.value = value; this.parentNode = null; }
@@ -68,7 +77,11 @@ class Element {
   }
   classes() { return new Set((this.getAttribute('class') || '').split(/\s+/).filter(Boolean)); }
   getAttribute(name) { return this.attrs.has(name) ? this.attrs.get(name) : null; }
-  setAttribute(name, value) { this.attrs.set(name, String(value)); changes.push(this); }
+  setAttribute(name, value) {
+    this.attrs.set(name, String(value));
+    changes.push(this);
+    if (name === 'hidden' && active && this.contains(active)) { active = null; }  // hidden: no longer focused
+  }
   hasAttribute(name) { return this.attrs.has(name); }
   removeAttribute(name) { this.attrs.delete(name); changes.push(this); }
   get id() { return this.getAttribute('id') || ''; }
@@ -106,13 +119,14 @@ class Element {
   set innerHTML(v) { throw new Error('HTML inserted with innerHTML: ' + v); }
   set outerHTML(v) { throw new Error('HTML inserted with outerHTML: ' + v); }
   insertAdjacentHTML(where, v) { throw new Error('HTML inserted with insertAdjacentHTML: ' + v); }
-  appendChild(node) { return adopt(this, node, this.childNodes.length); }
-  insertBefore(node, ref) { return adopt(this, node, ref ? this.childNodes.indexOf(ref) : this.childNodes.length); }
+  appendChild(node) { return adopt(this, node, null); }
+  insertBefore(node, ref) { return adopt(this, node, ref || null); }
   removeChild(node) {
     const i = this.childNodes.indexOf(node);
     if (i < 0) { throw new Error('removeChild: not a child'); }
     this.childNodes.splice(i, 1);
     node.parentNode = null;
+    if (active && node.contains(active)) { active = null; }  // out of the page: no longer focused
     changes.push(this);
     mutated.add(this);
     return node;
@@ -124,10 +138,20 @@ class Element {
   querySelectorAll(selector) { return descendants(this).filter(matcher(selector)); }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   addEventListener(event, f) { (this.listeners[event] = this.listeners[event] || []).push(f); }
+  focus() {
+    if (!root.contains(this) || !(FOCUSABLE.has(this.tagName) || this.hasAttribute('tabindex')) ||
+        this.hasAttribute('disabled')) { return; }
+    for (let e = this; e; e = e.parentNode) { if (e.hasAttribute('hidden')) { return; } }
+    active = this;
+  }
 }
 
-function adopt(parent, node, index) {
+// As in a browser, a node already in the page leaves its place first; then it goes before `ref` (null: at the end).
+function adopt(parent, node, ref) {
+  if (ref === node) { ref = node.nextSibling; }
   if (node.parentNode) { node.parentNode.removeChild(node); }
+  const index = ref ? parent.childNodes.indexOf(ref) : parent.childNodes.length;
+  if (index < 0) { throw new Error('insertBefore: not a child'); }
   added.push({ parent, cls: node.nodeType === 1 ? node.className : null, text: node.textContent });
   node.parentNode = parent;
   parent.childNodes.splice(index, 0, node);
@@ -166,7 +190,7 @@ function matcher(selector) {  // only the selectors the scripts use: an unknown 
 function build(node) {
   if ('text' in node) { return new Text(node.text); }
   const el = new Element(node.tag, node.attrs);
-  node.children.forEach(c => adopt(el, build(c), el.childNodes.length));
+  node.children.forEach(c => adopt(el, build(c), null));
   return el;
 }
 
@@ -187,6 +211,7 @@ const document = {
   querySelector: selector => root.querySelector(selector),
   querySelectorAll: selector => root.querySelectorAll(selector),
   addEventListener: (event, f) => { (listeners[event] = listeners[event] || []).push(f); },
+  get activeElement() { return active || root; },
 };
 
 // Bootstrap 4's tab('show') on a tab link: the other tabs of its .nav and the other panes of its .tab-content are
@@ -231,7 +256,7 @@ function $(selector) {
       found.forEach(e => {
         if (v !== null && typeof v === 'object' && v.tree) {  // the panel's HTML for #top10, parsed by the test
           e.textContent = '';
-          v.tree.children.forEach(c => adopt(e, build(c), e.childNodes.length));
+          v.tree.children.forEach(c => adopt(e, build(c), null));
         } else {
           e.textContent = v;  // the disk poll only writes sizes and numbers
         }
@@ -303,6 +328,18 @@ if (stored) {
   sandbox.window.localStorage = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); },
                                   removeItem: () => {} };
 }
+// sessionStorage, as the input says: none, a working one, or one that throws at any use (blocked).
+const session = input.session && typeof input.session === 'object' ? Object.assign({}, input.session) : null;
+if (session) {
+  sandbox.window.sessionStorage = {
+    getItem: k => (Object.prototype.hasOwnProperty.call(session, k) ? session[k] : null),
+    setItem: (k, v) => { session[k] = String(v); },
+    removeItem: k => { delete session[k]; },
+  };
+} else if (input.session === 'throws') {
+  Object.defineProperty(sandbox.window, 'sessionStorage',
+                        { get() { throw new Error('SecurityError: storage blocked'); } });
+}
 vm.createContext(sandbox);
 
 function colours(el) {
@@ -371,6 +408,12 @@ function snapshot() {
     sent: sent.slice(), reloads,
     graphs: graphs(),
     storage: stored ? Object.assign({}, stored) : null,
+    session: session ? Object.assign({}, session) : null,
+    focus: active ? active.id || active.tagName.toLowerCase() : null,
+    children: object((input.children || []).map(id => {
+      const e = document.getElementById(id);
+      return [id, e ? e.children.map(c => c.id || c.tagName.toLowerCase()) : null];
+    })),
   };
   const top10 = document.getElementById('top10');
   if (top10) {  // the bandwidth card: its tabs, its panes, and its text outside them (a message)
@@ -425,9 +468,13 @@ function play(step) {
     send('live', { disks: step.live });
   } else if (step.event) {
     send(step.event, step.data);
-  } else if (step.click || step.clickOn || step.summary) {
+  } else if (step.click || step.clickOn || step.summary || step.press) {
     let el;
-    if (step.summary) {
+    if (step.press) {
+      el = document.getElementById(step.press);
+      if (el) { el.focus(); }
+      if (el && active !== el) { throw new Error('cannot have the focus: ' + step.press); }
+    } else if (step.summary) {
       const d = root.querySelectorAll('details').find(x => x.getAttribute('data-section') === step.summary);
       el = d && d.children.find(c => c.tagName === 'SUMMARY');
     } else {

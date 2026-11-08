@@ -231,7 +231,8 @@ def index(user):
     else:
         vendor = "swizzin"
     layout = layout_choices.get(user)  # never fails: a broken file gives the default layout
-    return flask.render_template('index.html', title='{user} - swizzin dashboard'.format(user=user), user=user, pages=pages, quota=quota, vendor=vendor, mounts=mounts, async_mode=socketio.async_mode, layout=layout)
+    arrangement = layout_choices.arrangement(user) if layout == 'overview' else None  # never fails either
+    return flask.render_template('index.html', title='{user} - swizzin dashboard'.format(user=user), user=user, pages=pages, quota=quota, vendor=vendor, mounts=mounts, async_mode=socketio.async_mode, layout=layout, overview_zones=layouts.zones(arrangement))
 
 @app.route('/layout', methods=['POST'])
 @htpasswd.required
@@ -248,6 +249,24 @@ def set_layout(user):
         app.logger.warning("The layout of %s could not be saved in %s: %s", user, layout_choices.path, e)
         return flask.jsonify(error='not saved'), 503
     return flask.jsonify(layout=name)
+
+@app.route('/layout/arrange', methods=['POST'])
+@htpasswd.required
+def arrange_overview(user):
+    """The arrangement of Overview made with Customize (see the README), kept for the account logged in: never for one
+    named in the request. JSON only, like /layout: {"order": [...], "hidden": [...], "other_column": [...]}, or
+    {"reset": true} for the default one."""
+    data = flask.request.get_json(silent=True)  # None for another content type or a body that is not JSON
+    try:
+        arrangement = None if data == {'reset': True} and data['reset'] is True else layouts.checked(data)
+    except ValueError as e:
+        return flask.jsonify(error=str(e)), 400
+    try:
+        layout_choices.arrange(user, arrangement)
+    except OSError as e:
+        app.logger.warning("The arrangement of %s could not be saved in %s: %s", user, layout_choices.path, e)
+        return flask.jsonify(error='not saved'), 503
+    return flask.jsonify(arrangement=arrangement)
 
 @socketio.on('connect', namespace='/websocket')
 def socket_connect(auth=None):  # auth: what a client may send; not used here, but must not make the handler fail

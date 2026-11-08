@@ -7,13 +7,34 @@
    sections by static/js/overview.js; the look is in static/css/overview.css.
    The blocks of each zone (the tiles, the row under them, the two columns of Details) are listed in
    core/overview_blocks.py, each with its template in templates/overview/, which may use the macros and the variables
-   set here (admin, disk_card). #}
+   set here (admin, disk_card).
+   Each account may arrange them with Customize (static/js/arrange.js, core/layouts.py): overview_zones gives the blocks
+   of each zone in the account's order, each with whether it is hidden. Each block is rendered first, here, to know
+   the ones this account gets (a template that renders nothing, such as a block of the admin for another account,
+   is left out, whatever the arrangement says), then put in its place: as it is, or in an element with the hidden
+   attribute, so that the scripts that read it keep working. A column of Details with nothing to show is hidden, so
+   that the other one takes the whole width. The editor of Customize is made by static/js/arrange.js from the blocks
+   listed on its button, those of this page only. #}
 {% from 'live_graph.html' import live_graph, bandwidth_graph %}
 {% set admin = config.ADMIN_USER == user %}
 {% set disk_card = (quota == False or admin) %}
 {% macro amounts(id) -%}
 <span class="ov-down"><span aria-hidden="true">↓</span><span class="sr-only">Down</span> <span id="{{ id }}-rx">--</span></span>
 <span class="ov-up"><span aria-hidden="true">↑</span><span class="sr-only">Up</span> <span id="{{ id }}-tx">--</span></span>
+{%- endmacro %}
+{%- set rendered, shown, visible = {}, {}, {} %}
+{%- set editor = {"zones": overview_blocks.ZONES|list, "blocks": [], "order": []} %}
+{%- for zone, items in overview_zones.items() %}{% for block, hidden in items %}
+  {%- set html %}{% include block.template %}{% endset %}
+  {%- set _ = rendered.update({block.id: html}) %}
+  {%- if html|trim %}
+    {%- set _ = shown.update({block.id: true}) %}{% if not hidden %}{% set _ = visible.update({zone: true}) %}{% endif %}
+    {%- set _ = editor.blocks.append({"id": block.id, "label": block.label, "zone": zone, "home": block.zone, "hidden": hidden}) %}
+  {%- endif %}
+{%- endfor %}{% endfor %}
+{%- for block in overview_blocks.BLOCKS if block.id in shown %}{% set _ = editor.order.append(block.id) %}{% endfor %}
+{%- macro place(block, hidden) -%}
+{%- if hidden and block.id in shown %}<div class="ov-hidden-block" data-block="{{ block.id }}" hidden>{{ rendered[block.id] }}</div>{% else %}{{ rendered[block.id] }}{% endif %}
 {%- endmacro %}
 <div class="container-fluid overview">
   {# "Disk almost full" banner, as in Classic (templates/index.html): same condition as the Disk Info card. #}
@@ -26,15 +47,16 @@
     <div class="ov-heading">
       <h2 class="ov-title" id="ov-glance">At a glance</h2>
       <span class="ov-hint">Live, with the last 5 minutes</span>
-      {%- for block in overview_blocks.zone('glance') %}{% include block.template %}{% endfor %}
+      {%- for block, hidden in overview_zones['glance'] %}{{ place(block, hidden) }}{% endfor %}
+      <button type="button" class="btn btn-sm btn-secondary ov-customize" id="ov-customize" data-url="{{ url_for('arrange_overview') }}" data-logout="{{ url_for('logout') }}" data-blocks='{{ editor|tojson }}' hidden>Customize</button>
     </div>
     <div class="ov-tiles">
-      {%- for block in overview_blocks.zone('tiles') %}{% include block.template %}{% endfor %}
+      {%- for block, hidden in overview_zones['tiles'] %}{{ place(block, hidden) }}{% endfor %}
     </div>
   </section>
 
   <div class="ov-row">
-    {%- for block in overview_blocks.zone('row') %}{% include block.template %}{% endfor %}
+    {%- for block, hidden in overview_zones['row'] %}{{ place(block, hidden) }}{% endfor %}
   </div>
 
   {# The cards of the Classic layout, unchanged: each one in a <details> element, which the keyboard and screen readers
@@ -48,12 +70,11 @@
       <span class="ov-hint">The cards of the Classic layout</span>
     </div>
     <div class="live-stack" data-urlbase="{{ config.URLBASE }}">
-      <div class="ov-column">
-        {%- for block in overview_blocks.zone('left') %}{% include block.template %}{% endfor %}
+      {%- for column in ('left', 'right') %}
+      <div class="ov-column"{% if not visible[column] %} hidden{% endif %}>
+        {%- for block, hidden in overview_zones[column] %}{{ place(block, hidden) }}{% endfor %}
       </div>
-      <div class="ov-column">
-        {%- for block in overview_blocks.zone('right') %}{% include block.template %}{% endfor %}
-      </div>
+      {%- endfor %}
     </div>
   </section>
 </div>

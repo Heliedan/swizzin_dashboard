@@ -9,12 +9,14 @@ no disk quota...): an account that may not see a block gets nothing from it. Eac
                the block's id (the browser keeps the open ones by it). One column on a narrow screen, left first.
 A new block is one more line here, with its script or its stylesheet if it has one (in static/): templates/index.html
 loads those of the Overview layout from here, after the layout's own (SCRIPTS, STYLESHEETS). The id stays the same
-for good; the label is the block's name for people. tests/test_overview_blocks.py checks this list."""
+for good; the label is the block's name for people. tests/test_overview_blocks.py checks this list.
+Each account may move, hide or (in Details) put in the other column the blocks it sees, with Customize
+(core/layouts.py, static/js/arrange.js): a new block can be arranged like the others, with nothing more to write."""
 
 ZONES = ("glance", "tiles", "row", "left", "right")
 
 STYLESHEETS = ["css/overview.css"]
-SCRIPTS = ["js/overview.js"]
+SCRIPTS = ["js/overview.js", "js/arrange.js"]  # arrange.js: Customize, each account's order (core/layouts.py)
 
 BLOCKS = [
     {"id": "system-status", "zone": "glance", "template": "overview/system_status.html", "label": "Reboot and updates",
