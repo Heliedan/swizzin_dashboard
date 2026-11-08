@@ -192,8 +192,20 @@ class Write(LayoutsTest):
         self.assertEqual(self.leftovers(), [])
 
 
-ARRANGED = {"order": ["tile-ram", "tile-cpu", "services", "bandwidth", "disks", "cpu", "ram"], "hidden": ["ram"],
-            "other_column": ["disks"]}
+# An arrangement as this version keeps it: its four lists, hidden and shown holding only what differs from the
+# defaults (a tile is never hidden by default).
+ARRANGED = {"order": ["tile-ram", "tile-cpu", "services", "bandwidth", "disks", "cpu", "ram"], "hidden": ["tile-ram"],
+            "shown": [], "other_column": ["disks"]}
+BY_DEFAULT = [block["id"] for block in overview_blocks.BLOCKS if block.get("hidden")]  # hidden by default
+SHOWN = [block["id"] for block in overview_blocks.BLOCKS if not block.get("hidden")]  # shown by default
+WIDE = [block["id"] for block in overview_blocks.zone("wide")]  # across the whole width of Details
+
+
+def hidden(block_id, arrangement=None):
+    """Whether the page hides `block_id` with `arrangement`: hidden by it, or hidden by default and not shown by it."""
+    arrangement = arrangement or {}
+    return block_id in arrangement.get("hidden", []) or (
+        block_id in BY_DEFAULT and block_id not in arrangement.get("shown", []))
 
 
 def ids(zones):
@@ -233,7 +245,8 @@ class ReadArrangement(LayoutsTest):
                  "collapsed": ["cpu"], "theme": "dark"}
         self.write(json.dumps({"tester": {"layout": "overview", "overview": value, "colour": "teal"}}))
         self.assertEqual(self.choice("tester"),
-                         ("overview", {"order": ["tile-ram", "cpu"], "hidden": [], "other_column": ["disks", "cpu"]}))
+                         ("overview", {"order": ["tile-ram", "cpu"], "hidden": [], "shown": [],
+                                       "other_column": ["disks", "cpu"]}))
 
     def test_no_more_than_the_limit_is_read(self):
         junk = ["junk%d" % i for i in range(layouts.LIMIT - 2)]
@@ -241,7 +254,7 @@ class ReadArrangement(LayoutsTest):
                  "hidden": junk + ["x", "y", "cpu"]}  # cpu: the 65th
         self.write(json.dumps({"tester": {"overview": value}}))
         self.assertEqual(self.choice("tester")[1],
-                         {"order": ["tile-disk", "tile-ram"], "hidden": [], "other_column": []})
+                         {"order": ["tile-disk", "tile-ram"], "hidden": [], "shown": [], "other_column": []})
 
     def test_an_arrangement_of_another_meaning_is_not_read(self):
         """A later version that changes what the lists mean marks its arrangement with "v": this one leaves it."""
@@ -255,7 +268,8 @@ class ReadArrangement(LayoutsTest):
         default one, even when only some blocks are listed (those of another account, say)."""
         every = [block["id"] for block in overview_blocks.BLOCKS]
         for value in ({"order": every}, {"order": ["tile-cpu", "tile-disk", "cpu", "network"]}, {"order": []}, {},
-                      {"hidden": [], "other_column": []}, {"hidden": ["nothing-known"]}):
+                      {"hidden": [], "other_column": []}, {"hidden": ["nothing-known"]},
+                      {"hidden": BY_DEFAULT, "shown": SHOWN}):  # each block as it is by default: nothing changed
             with self.subTest(value):
                 self.write(json.dumps({"tester": {"overview": value}}))
                 self.assertEqual(self.choice("tester"), ("classic", None))
@@ -279,12 +293,92 @@ class ReadArrangement(LayoutsTest):
         self.assertIn("Overview shows its blocks in their default order", logs.output[0])
 
 
+class DefaultsAndShown(LayoutsTest):
+    """The blocks hidden by default ("hidden" in core/overview_blocks.py) and the list "shown" of an arrangement: it
+    says only what the account changed, so that an arrangement keeps its meaning when a default changes."""
+
+    def test_the_list_has_blocks_hidden_by_default_and_blocks_shown(self):
+        self.assertTrue(BY_DEFAULT)
+        self.assertTrue(SHOWN)
+
+    def test_a_block_hidden_by_default_shown_again(self):
+        """Shown by the account: in "shown", and on the page; the others hidden by default stay hidden."""
+        first = BY_DEFAULT[0]
+        arrangement = layouts.checked({"shown": [first]})
+        self.assertEqual(arrangement, {"order": [], "hidden": [], "shown": [first], "other_column": []})
+        self.choices.set("tester", "overview")
+        self.choices.arrange("tester", arrangement)
+        self.assertEqual(self.content(), {"tester": {"layout": "overview", "overview": arrangement}})
+        self.assertEqual(self.choice("tester"), ("overview", arrangement))
+        flags = {i: flag for items in ids(layouts.zones(arrangement)).values() for i, flag in items}
+        self.assertEqual({i for i, flag in flags.items() if flag}, set(BY_DEFAULT) - {first})
+        self.choices.arrange("tester", None)  # Reset to default: hidden again, the plain name back
+        self.assertEqual(self.content(), {"tester": "overview"})
+        flags = {i: flag for items in ids(layouts.zones(self.choices.arrangement("tester"))).values()
+                 for i, flag in items}
+        self.assertEqual({i for i, flag in flags.items() if flag}, set(BY_DEFAULT))
+
+    def test_what_changes_nothing_is_left_out(self):
+        """A block hidden by default in hidden, or shown by default in shown: the same page, so it is not kept."""
+        value = {"order": ["tile-cpu"], "hidden": BY_DEFAULT + ["tile-ram"], "shown": SHOWN, "other_column": []}
+        self.assertEqual(layouts.read(value), {"order": ["tile-cpu"], "hidden": ["tile-ram"], "shown": [],
+                                               "other_column": []})
+        self.assertEqual(layouts.checked(dict(value, shown=[])), layouts.read(value))
+
+    def test_a_block_both_hidden_and_shown_is_read_hidden(self):
+        both = [BY_DEFAULT[0], "tile-ram"]
+        arrangement = layouts.read({"hidden": both, "shown": both + [BY_DEFAULT[-1]]})
+        flags = {i: flag for items in ids(layouts.zones(arrangement)).values() for i, flag in items}
+        self.assertTrue(flags[BY_DEFAULT[0]] and flags["tile-ram"])
+        self.assertEqual(flags[BY_DEFAULT[-1]], len(BY_DEFAULT) == 1)  # shown, unless it is the same block
+
+    def test_an_arrangement_of_the_previous_version(self):
+        """Written before "shown" and the blocks hidden by default (#30): it said what the account hid. Read now, the
+        blocks hidden by default are hidden too (the account never chose to show them), what it hid stays hidden, a
+        section it put in the other column that now takes the whole width of Details stays there, and the file is not
+        written again."""
+        details = [b["id"] for b in overview_blocks.BLOCKS if b["zone"] in ("left", "right", "wide")]
+        old = {"order": ["tile-ram", "tile-cpu"] + details, "hidden": [BY_DEFAULT[0], "tile-disk"],
+               "other_column": ["disks"] + WIDE}
+        text = json.dumps({"tester": {"layout": "overview", "overview": old}, "friend": "classic"})
+        self.write(text)
+        arrangement = self.choices.arrangement("tester")
+        self.assertEqual(arrangement, {"order": old["order"], "hidden": ["tile-disk"], "shown": [],
+                                       "other_column": ["disks"]})
+        zones = ids(layouts.zones(arrangement))
+        flags = {i: flag for items in zones.values() for i, flag in items}
+        self.assertEqual({i for i, flag in flags.items() if flag}, set(BY_DEFAULT) | {"tile-disk"})
+        self.assertEqual([i for i, _ in zones["wide"]], [i for i in old["order"] if i in WIDE])
+        self.assertEqual([i for i, _ in zones["left"]][-1], "disks")
+        with open(self.path) as f:
+            self.assertEqual(f.read(), text)  # reading changes nothing
+
+    def test_a_file_of_the_previous_version_without_arrangement(self):
+        """An account with its plain name: the page of everyone, the blocks hidden by default hidden."""
+        self.write('{"tester": "overview"}')
+        self.assertEqual(self.choice("tester"), ("overview", None))
+        flags = {i: flag for items in ids(layouts.zones(None)).values() for i, flag in items}
+        self.assertEqual({i for i, flag in flags.items() if flag}, set(BY_DEFAULT))
+
+    def test_what_this_version_writes_keeps_the_lists_of_the_previous_one(self):
+        """The three lists of the previous version keep their meaning (what the account hid, its order, its columns),
+        and "shown" is one more key: that version leaves out the keys it does not know, so it shows what the account
+        arranged there, but for the blocks hidden by default here, which it shows as it showed every block."""
+        self.choices.set("tester", "overview")
+        self.choices.arrange("tester", layouts.checked(dict(ARRANGED, shown=BY_DEFAULT[:1])))
+        kept = self.content()["tester"]["overview"]
+        self.assertEqual(sorted(kept), ["hidden", "order", "other_column", "shown"])
+        self.assertEqual((kept["hidden"], kept["other_column"]), (ARRANGED["hidden"], ARRANGED["other_column"]))
+        self.assertEqual(kept["shown"], BY_DEFAULT[:1])
+
+
 class Zones(unittest.TestCase):
     """zones(): the blocks of each zone of the page, in the order of an arrangement."""
 
     def test_without_arrangement_the_order_of_the_list(self):
+        """Each block in its zone, in the order of the list, hidden when it is hidden by default."""
         self.assertEqual(ids(layouts.zones(None)),
-                         {zone: [(block["id"], False) for block in overview_blocks.zone(zone)]
+                         {zone: [(block["id"], bool(block.get("hidden"))) for block in overview_blocks.zone(zone)]
                           for zone in overview_blocks.ZONES})
         self.assertEqual(list(layouts.zones(None)), list(overview_blocks.ZONES))
 
@@ -292,13 +386,13 @@ class Zones(unittest.TestCase):
         """In its order, the hidden ones marked; a section in the other column at its place in the order; a block it
         does not list after those it lists, in the order of the list."""
         zones = ids(layouts.zones(ARRANGED))
-        self.assertEqual(zones["tiles"][:2], [("tile-ram", False), ("tile-cpu", False)])
+        self.assertEqual(zones["tiles"][:2], [("tile-ram", True), ("tile-cpu", False)])
         self.assertEqual(zones["tiles"][2:], [(b["id"], False) for b in overview_blocks.zone("tiles")
                                               if b["id"] not in ("tile-ram", "tile-cpu")])
         self.assertEqual(zones["row"][:2], [("services", False), ("bandwidth", False)])
-        self.assertEqual(zones["left"][:3], [("disks", False), ("cpu", False), ("ram", True)])
+        self.assertEqual(zones["left"][:3], [(i, hidden(i, ARRANGED)) for i in ("disks", "cpu", "ram")])
         self.assertNotIn("disks", [i for i, _ in zones["right"]])
-        self.assertEqual(zones["glance"], [(b["id"], False) for b in overview_blocks.zone("glance")])
+        self.assertEqual(zones["glance"], [(b["id"], hidden(b["id"])) for b in overview_blocks.zone("glance")])
         every = sorted(i for items in zones.values() for i, _ in items)
         self.assertEqual(every, sorted(block["id"] for block in overview_blocks.BLOCKS))  # each block once
 
@@ -307,10 +401,11 @@ class Zones(unittest.TestCase):
         extra = {"id": "extra", "zone": "right", "template": "overview/extra.html", "label": "Extra"}
         with mock.patch.object(overview_blocks, "BLOCKS", overview_blocks.BLOCKS + [extra]):
             arrangement = layouts.read({"order": ["extra", "cpu"], "hidden": ["extra"], "other_column": ["extra"]})
-            self.assertEqual(arrangement, {"order": ["extra", "cpu"], "hidden": ["extra"], "other_column": ["extra"]})
-            self.assertEqual(ids(layouts.zones(arrangement))["left"][:2], [("extra", True), ("cpu", False)])
+            self.assertEqual(arrangement, {"order": ["extra", "cpu"], "hidden": ["extra"], "shown": [],
+                                           "other_column": ["extra"]})
+            self.assertEqual(ids(layouts.zones(arrangement))["left"][:2], [("extra", True), ("cpu", hidden("cpu"))])
             self.assertEqual(layouts.checked({"order": ["extra"], "other_column": ["extra"]}),
-                             {"order": ["extra"], "hidden": [], "other_column": ["extra"]})
+                             {"order": ["extra"], "hidden": [], "shown": [], "other_column": ["extra"]})
         self.assertIsNone(layouts.read({"order": ["extra", "cpu"]}))  # once it is gone, it is left out
 
 
@@ -320,13 +415,16 @@ class Checked(unittest.TestCase):
     def test_an_arrangement(self):
         self.assertEqual(layouts.checked(ARRANGED), ARRANGED)
         self.assertEqual(layouts.checked({"hidden": ["tile-cpu"]}),
-                         {"order": [], "hidden": ["tile-cpu"], "other_column": []})
-        self.assertEqual(layouts.checked({"other_column": ["network"]}),
-                         {"order": [], "hidden": [], "other_column": ["network"]})
+                         {"order": [], "hidden": ["tile-cpu"], "shown": [], "other_column": []})
+        self.assertEqual(layouts.checked({"other_column": ["disks"]}),
+                         {"order": [], "hidden": [], "shown": [], "other_column": ["disks"]})
+        self.assertEqual(layouts.checked({"shown": BY_DEFAULT}),
+                         {"order": [], "hidden": [], "shown": BY_DEFAULT, "other_column": []})
 
     def test_the_default_arrangement_is_none(self):
         every = [block["id"] for block in overview_blocks.BLOCKS]
-        for value in ({"order": every}, {"order": every[:3]}, {"order": []}, {"hidden": []}):
+        for value in ({"order": every}, {"order": every[:3]}, {"order": []}, {"hidden": []}, {"shown": []},
+                      {"hidden": BY_DEFAULT}, {"shown": SHOWN}, {"hidden": BY_DEFAULT, "shown": SHOWN}):
             with self.subTest(value):
                 self.assertIsNone(layouts.checked(value))
 
@@ -338,7 +436,9 @@ class Checked(unittest.TestCase):
                  {"order": ["CPU"]}, {"hidden": ["ram", "ram"]}, {"hidden": too_many},
                  {"order": [b["id"] for b in overview_blocks.BLOCKS] + ["x%d" % i for i in range(layouts.LIMIT)]},
                  {"other_column": ["tile-cpu"]}, {"other_column": ["services"]}, {"other_column": ["system-status"]},
-                 {"other_column": ["disks", "disks"]}]
+                 {"other_column": ["disks", "disks"]}, {"other_column": WIDE[:1]}, {"shown": "cpu"},
+                 {"shown": ["future-block"]}, {"shown": ["cpu", "cpu"]}, {"shown": [3]}, {"shown": too_many},
+                 {"hidden": ["cpu"], "shown": ["cpu"]}, {"hidden": ["tile-ram"], "shown": ["tile-ram", "cpu"]}]
         for value in cases:
             with self.subTest(value):
                 with self.assertRaises(ValueError):

@@ -21,9 +21,12 @@ from test_layouts_page import ROOT, Ids, LayoutTest, auth, swizzin  # noqa: E402
 from core import layouts, overview_blocks  # noqa: E402
 from core.middleware import PrefixMiddleware  # noqa: E402
 
+# An arrangement as the panel keeps it (core/layouts.py): RAM Info, hidden by default, shown again.
 ARRANGED = {"order": ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "disks", "cpu", "ram",
                       "quota", "network"],
-            "hidden": ["ram", "tile-disk"], "other_column": ["disks"]}
+            "hidden": ["tile-disk"], "shown": ["ram"], "other_column": ["disks"]}
+BY_DEFAULT = [block["id"] for block in overview_blocks.BLOCKS if block.get("hidden")]  # hidden by default
+WIDE = [block["id"] for block in overview_blocks.zone("wide")]  # across the whole width of Details
 ADMIN_ONLY = ["system-status", "tile-net", "bandwidth"]
 EXTRA = {"id": "extra", "zone": "right", "template": "overview/extra.html", "label": "Extra <b>block</b>"}
 EXTRA_HTML = ('<details class="card ov-section" data-section="extra"><summary class="card-header">Extra</summary>'
@@ -45,9 +48,9 @@ def editor(page):
 
 def places(page):
     """The blocks of the page in its order: tiles and sections by id, the bandwidth card, Service Info, the columns
-    (with " hidden" when hidden), and the elements that hide a block ("hidden:<id>")."""
+    and the whole width of Details (with " hidden" when hidden), and the elements that hide a block ("hidden:<id>")."""
     found = re.findall(r'id="(tile-[a-z]+|ov-status)"|<section class="card (ov-network)"|class="card-header">'
-                       r'(Service Info)<|<div class="(ov-column)"( hidden)?|data-section="([\w-]+)"|'
+                       r'(Service Info)<|<div class="(ov-column|ov-wide)"( hidden)?|data-section="([\w-]+)"|'
                        r'<div class="ov-hidden-block" data-block="([\w-]+)" hidden>', page)
     out = []
     for tile, network, services, column, column_hidden, section, hidden in found:
@@ -58,12 +61,13 @@ def places(page):
 def layout(page):
     """The page by zone, as the panel rendered it: the ids of the blocks of each zone in their order (the sections by
     their data-section, the tiles by their id, the pills and the two cards of the row by what they are); "hidden", the
-    blocks in an element with the hidden attribute, in the order of the page; "hidden columns", the columns hidden."""
+    blocks in an element with the hidden attribute, in the order of the page; "hidden columns", the columns of Details
+    hidden, and "wide" when its whole width is."""
     out = {zone: [] for zone in overview_blocks.ZONES}
     out.update({"hidden": [], "hidden columns": []})
-    columns, zone = iter(("left", "right")), None
+    columns, zone = iter(("left", "right", "wide")), None
     for item in places(page):
-        if item.startswith("ov-column"):
+        if item.startswith(("ov-column", "ov-wide")):
             zone = next(columns)
             if item.endswith(" hidden"):
                 out["hidden columns"].append(zone)
@@ -83,6 +87,14 @@ def layout(page):
 def seen(page):
     """The blocks that layout() finds on a page."""
     return {i for zone in overview_blocks.ZONES for i in layout(page)[zone]}
+
+
+def hidden_on(page_order, arrangement=None):
+    """Those of `page_order` that the page hides with `arrangement`: hidden by it, or hidden by default and not shown by
+    it."""
+    arrangement = arrangement or {}
+    return [i for i in page_order if i in arrangement.get("hidden", []) or
+            (i in BY_DEFAULT and i not in arrangement.get("shown", []))]
 
 
 def unlisted(zone, arrangement, shown):
@@ -214,30 +226,35 @@ class Page(ArrangeTest):
 
     def test_in_the_order_of_the_account(self):
         """The blocks it lists first, in its order, hidden or in the other column as it says; then, in each zone, those
-        it does not list, in the order of core/overview_blocks.py (Top processes and Panel sign-ins, added since)."""
+        it does not list, in the order of core/overview_blocks.py (Top processes and Panel sign-ins, added since). A
+        block hidden by default stays hidden unless it shows it (RAM Info shown, CPU Info not)."""
         shown = seen(self.overview("tester", quota=True))
         found = layout(self.overview("tester", ARRANGED, quota=True))
         listed = {"glance": [], "tiles": ["tile-ram", "tile-cpu", "tile-net", "tile-disk"],
-                  "row": ["services", "bandwidth"], "left": ["disks", "cpu", "ram"], "right": ["quota", "network"]}
+                  "row": ["services", "bandwidth"], "left": ["disks", "cpu", "ram"], "right": ["quota"],
+                  "wide": ["network"]}
         for zone, ids in listed.items():
             with self.subTest(zone):
                 self.assertEqual(found[zone], ids + unlisted(zone, ARRANGED, shown))
-        self.assertEqual((found["hidden"], found["hidden columns"]), (["tile-disk", "ram"], []))
-        self.assertIn("processes", found["left"][3:])
-        self.assertIn("signins", found["right"][2:])
+        order = [i for zone in overview_blocks.ZONES for i in found[zone]]
+        self.assertEqual((found["hidden"], found["hidden columns"]), (hidden_on(order, ARRANGED), []))
+        self.assertIn("tile-disk", found["hidden"])
+        self.assertNotIn("ram", found["hidden"])
+        self.assertIn("processes", found["wide"][1:])
+        self.assertIn("signins", found["right"][1:])
 
     def test_a_hidden_block_stays_in_the_page(self):
         """In an element with the hidden attribute: the scripts that fill it or read it keep working, and nothing more
         or less is sent to the account."""
         before = Ids(self.overview("tester", quota=True)).ids
-        page = self.overview("tester", {"hidden": ["ram", "tile-disk", "network", "bandwidth", "system-status"]},
-                             quota=True)
+        hiding = ["disks", "tile-disk", "network", "bandwidth", "system-status"]
+        page = self.overview("tester", {"hidden": hiding}, quota=True)
         self.assertEqual(sorted(Ids(page).ids), sorted(before))
-        for block in ("ram", "tile-disk", "network", "bandwidth", "system-status"):
+        for block in hiding + BY_DEFAULT:
             self.assertEqual(page.count('<div class="ov-hidden-block" data-block="%s" hidden>' % block), 1, block)
-        self.assertIn('<div class="ov-hidden-block" data-block="ram" hidden><details class="card ov-section" '
-                      'data-section="ram">', page.replace("\n", "").replace("  ", ""))
-        self.assertEqual(page.count("ov-hidden-block"), 5)
+        self.assertIn('<div class="ov-hidden-block" data-block="disks" hidden><details class="card ov-section" '
+                      'data-section="disks">', page.replace("\n", "").replace("  ", ""))
+        self.assertEqual(page.count("ov-hidden-block"), len(hiding + BY_DEFAULT))
 
     def test_a_column_with_nothing_to_show_is_hidden(self):
         """The other one then takes the whole width of Details; its hidden sections stay in the page. Whatever the
@@ -246,16 +263,26 @@ class Page(ArrangeTest):
         left = [b["id"] for b in overview_blocks.zone("left")]
         right = [b["id"] for b in overview_blocks.zone("right")]
         on_left, on_right = [i for i in left if i in shown], [i for i in right if i in shown]
-        self.assertTrue(on_left and on_right)
-        found = layout(self.overview("tester", {"other_column": left}))  # not in an order: that of the list
+        on_wide = [i for i in WIDE if i in shown]
+        self.assertTrue(on_left and on_right and on_wide)
+        everything = {"shown": BY_DEFAULT}  # each block of the page shown, those hidden by default too
+        found = layout(self.overview("tester", dict(everything, other_column=left)))  # not in an order: the list's
         self.assertEqual((found["hidden columns"], found["left"]), (["left"], []))
         self.assertEqual(found["right"], [b["id"] for b in overview_blocks.BLOCKS if b["id"] in on_left + on_right])
-        found = layout(self.overview("tester", {"hidden": right}))
+        found = layout(self.overview("tester", dict(everything, hidden=right)))
         self.assertEqual((found["hidden columns"], found["left"], found["right"], found["hidden"]),
                          (["right"], on_left, on_right, on_right))
+        found = layout(self.overview("tester", dict(everything, hidden=WIDE)))
+        self.assertEqual((found["hidden columns"], found["wide"], found["hidden"]), (["wide"], on_wide, on_wide))
+        found = layout(self.overview("tester", everything))
+        self.assertEqual((found["hidden columns"], found["left"], found["right"], found["wide"], found["hidden"]),
+                         ([], on_left, on_right, on_wide, []))
+        # Without an arrangement: a column whose blocks are all hidden by default is hidden too.
         found = layout(self.overview("tester", {"reset": True}))
-        self.assertEqual((found["hidden columns"], found["left"], found["right"], found["hidden"]),
-                         ([], on_left, on_right, []))
+        empty = [zone for zone, ids in (("left", on_left), ("right", on_right), ("wide", on_wide))
+                 if all(i in BY_DEFAULT for i in ids)]
+        self.assertEqual((found["hidden columns"], found["left"], found["right"], found["wide"], found["hidden"]),
+                         (empty, on_left, on_right, on_wide, hidden_on(on_left + on_right + on_wide)))
 
     def test_the_blocks_of_the_admin_never_for_another_account(self):
         """Whatever its arrangement says: listed first, hidden, or in another column, they are not rendered at all,
@@ -279,7 +306,8 @@ class Page(ArrangeTest):
         for block in admin_only:
             self.assertNotIn('data-section="%s"' % block, page)
             self.assertNotIn('data-block="%s"' % block, page)
-        self.assertNotIn("ov-hidden-block", page)
+        self.assertEqual(re.findall(r'class="ov-hidden-block" data-block="([\w-]+)"', page),
+                         [i for i in own if i in BY_DEFAULT])  # only those hidden by default
         self.assertEqual(layout(page)["tiles"][0], "tile-ram")
         data = editor(page)
         self.assertEqual(sorted(b["id"] for b in data["blocks"]), sorted(own))
@@ -299,7 +327,8 @@ class Page(ArrangeTest):
         self.assertEqual(ids, [b["id"] for z in overview_blocks.ZONES for b in overview_blocks.zone(z)
                                if b["id"] in ids])
         self.assertEqual(data["blocks"], [{"id": i, "label": registry[i]["label"], "zone": registry[i]["zone"],
-                                           "home": registry[i]["zone"], "hidden": False} for i in ids])
+                                           "home": registry[i]["zone"], "hidden": i in BY_DEFAULT,
+                                           "default_hidden": i in BY_DEFAULT} for i in ids])
         self.assertEqual(data["order"], [block["id"] for block in overview_blocks.BLOCKS if block["id"] in ids])
         self.assertEqual(data["zones"], list(overview_blocks.ZONES))
         self.assertEqual((data["url"], data["logout"]), ("/layout/arrange", "/logout"))
@@ -307,10 +336,10 @@ class Page(ArrangeTest):
         data, found = editor(page), layout(page)
         where = {b["id"]: (b["zone"], b["home"], b["hidden"]) for b in data["blocks"]}
         for block, expected in (("services", ("row", "row", False)), ("bandwidth", ("row", "row", False)),
-                                ("disks", ("left", "right", False)), ("cpu", ("left", "left", False)),
-                                ("ram", ("left", "left", True)), ("quota", ("right", "right", False)),
-                                ("network", ("right", "right", False)), ("processes", ("left", "left", False)),
-                                ("signins", ("right", "right", False))):
+                                ("disks", ("left", "right", False)), ("cpu", ("left", "left", True)),
+                                ("ram", ("left", "left", False)), ("quota", ("right", "right", False)),
+                                ("network", ("wide", "wide", False)), ("processes", ("wide", "wide", False)),
+                                ("signins", ("right", "right", False)), ("tile-disk", ("tiles", "tiles", True))):
             self.assertEqual(where[block], expected, block)
         known = seen(page)
         for zone in overview_blocks.ZONES:  # the editor's order is the page's (for the blocks layout() can tell)
@@ -355,20 +384,128 @@ class Page(ArrangeTest):
             page = self.overview("tester")
             found = layout(page)
             self.assertEqual((found["left"], found["right"]), (plain["left"], plain["right"] + ["extra"]))
-            self.assertEqual(editor(page)["blocks"][-1],
-                             {"id": "extra", "label": "Extra <b>block</b>", "zone": "right", "home": "right",
-                              "hidden": False})
+            self.assertEqual([b for b in editor(page)["blocks"] if b["id"] == "extra"],
+                             [{"id": "extra", "label": "Extra <b>block</b>", "zone": "right", "home": "right",
+                               "hidden": False, "default_hidden": False}])
             self.assertNotIn("<b>block</b>", page)  # escaped in the attribute; the editor writes it as text
             page = self.overview("tester", {"order": ["extra", "cpu"], "hidden": ["extra"], "other_column": ["extra"]})
             found = layout(page)
             self.assertEqual(found["left"], ["extra", "cpu"] + [i for i in plain["left"] if i != "cpu"])
-            self.assertEqual((found["right"], found["hidden"]), (plain["right"], ["extra"]))
+            self.assertEqual((found["right"], found["hidden"]),
+                             (plain["right"], hidden_on(found["left"], {"hidden": ["extra"]})))
+            self.assertEqual(found["hidden"][0], "extra")
             self.assertIn("extra-text", Ids(page).ids)
         swizzin.app.jinja_env.cache.clear()  # the page without it again
         page = self.page("tester")  # once the block is gone, its id is left out
         self.assertNotIn('data-section="extra"', page)
         self.assertNotIn("extra-text", page)
         self.assertEqual(layout(page), plain)
+
+
+class Defaults(ArrangeTest):
+    """The state of each block by default ("hidden" and "open" in core/overview_blocks.py), and what an account, or an
+    arrangement written by the previous version, makes of it."""
+
+    def sections(self, page):
+        """{id: open} of the sections of Details, as rendered."""
+        return {i: bool(o) for i, o in re.findall(r'<details class="card ov-section" data-section="([\w-]+)"( open)?>',
+                                                  page)}
+
+    def test_hidden_and_open_by_default(self):
+        """Without an arrangement: the blocks hidden by default in an element with the hidden attribute (the cards that
+        repeat the tiles), the sections open by default rendered open (those across the whole width), the others
+        closed; the editor lists each block with its state by default."""
+        page = self.overview("tester", quota=True)
+        found = layout(page)
+        order = [i for zone in overview_blocks.ZONES for i in found[zone]]
+        self.assertEqual(found["hidden"], hidden_on(order))
+        self.assertTrue(found["hidden"])
+        opened = {b["id"] for b in overview_blocks.BLOCKS if b.get("open")}
+        self.assertEqual(self.sections(page), {i: i in opened for i in self.sections(page)})
+        self.assertEqual(found["wide"], [i for i in WIDE if i in order])
+        data = editor(page)
+        self.assertEqual({b["id"]: (b["hidden"], b["default_hidden"]) for b in data["blocks"]},
+                         {i: (i in BY_DEFAULT, i in BY_DEFAULT) for i in order})
+
+    def test_a_block_hidden_by_default_shown_again(self):
+        """Customize sends it in "shown": the page shows it, and the other blocks hidden by default stay hidden.
+        Reset to default hides it again: the page of before, byte for byte."""
+        before = self.overview("tester", quota=True)
+        first = BY_DEFAULT[0]
+        r = self.arrange("tester", {"order": [], "hidden": [], "shown": [first], "other_column": []})
+        arrangement = {"order": [], "hidden": [], "shown": [first], "other_column": []}
+        self.assertEqual((r.status_code, r.get_json()), (200, {"arrangement": arrangement}))
+        self.assertEqual(self.choices(), {"tester": {"layout": "overview", "overview": arrangement}})
+        page = self.page("tester", quota=True)
+        found = layout(page)
+        order = [i for zone in overview_blocks.ZONES for i in found[zone]]
+        self.assertNotIn(first, found["hidden"])
+        self.assertEqual(found["hidden"], hidden_on(order, {"shown": [first]}))
+        self.assertEqual(set(found["hidden"]), set(BY_DEFAULT) - {first})
+        self.assertNotIn("left", found["hidden columns"])  # its column shows again
+        self.assertEqual([b["hidden"] for b in editor(page)["blocks"] if b["id"] == first], [False])
+        self.arrange("tester", {"reset": True})
+        self.assertEqual(self.choices(), {"tester": "overview"})
+        self.assertEqual(self.page("tester", quota=True), before)
+
+    def test_hidden_by_default_and_hidden_again_is_the_default(self):
+        """Sent hidden (as an editor that does not know the default would send it): the default arrangement, kept as
+        none."""
+        r = self.arrange("tester", {"hidden": BY_DEFAULT})
+        self.assertEqual((r.status_code, r.get_json()), (200, {"arrangement": None}))
+        self.assertEqual(self.choices(), {})
+
+    def test_shown_and_hidden_at_once_is_400(self):
+        for body in ({"hidden": BY_DEFAULT[:1], "shown": BY_DEFAULT[:1]}, {"shown": "cpu"}, {"shown": ["nothing"]}):
+            with self.subTest(body=body):
+                r = self.arrange("tester", body)
+                self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.choices(), {})
+
+    def test_the_sections_across_the_whole_width(self):
+        """In their own zone, under the two columns: they move within it, hide, but never go to a column."""
+        page = self.overview("tester")
+        self.assertEqual(layout(page)["wide"], WIDE)
+        self.assertEqual([b["zone"] for b in editor(page)["blocks"] if b["id"] in WIDE], ["wide"] * len(WIDE))
+        for block in WIDE:
+            with self.subTest(block):
+                self.assertEqual(self.arrange("tester", {"other_column": [block]}).status_code, 400)
+        found = layout(self.overview("tester", {"order": WIDE[::-1]}))
+        self.assertEqual(found["wide"], WIDE[::-1])
+        found = layout(self.overview("tester", {"hidden": WIDE}))
+        self.assertEqual((found["wide"], found["hidden"][-len(WIDE):], found["hidden columns"][-1]),
+                         (WIDE, WIDE, "wide"))
+
+    def test_a_file_of_the_previous_version_with_an_arrangement(self):
+        """Written by the previous version (#30), before "shown" and the whole width: what it hid stays hidden, the
+        blocks hidden by default are hidden as for everyone (it never chose to show them), Disk Info stays in the
+        other column, Network Info, which it had put in the other column, now takes the whole width; its order is
+        kept. Showing the page writes nothing."""
+        shown = seen(self.overview("tester", quota=True))
+        old = {"order": ["tile-ram", "tile-cpu", "tile-net", "tile-disk", "services", "bandwidth", "disks", "cpu",
+                         "ram", "quota", "network"],
+               "hidden": ["ram", "tile-disk"], "other_column": ["disks", "network"]}
+        text = json.dumps({"tester": {"layout": "overview", "overview": old}, "friend": "classic"})
+        with open(swizzin.layout_choices.path, "w") as f:
+            f.write(text)
+        page = self.page("tester", quota=True)
+        found = layout(page)
+        self.assertEqual(found["tiles"], ["tile-ram", "tile-cpu", "tile-net", "tile-disk"])
+        self.assertEqual(found["left"][:3], ["disks", "cpu", "ram"])
+        self.assertEqual(found["right"], ["quota"] + unlisted("right", old, shown))
+        self.assertEqual(found["wide"], ["network"] + [i for i in WIDE if i in shown and i != "network"])
+        order = [i for zone in overview_blocks.ZONES for i in found[zone]]
+        self.assertEqual(found["hidden"], hidden_on(order, {"hidden": ["tile-disk"]}))
+        self.assertIn("ram", found["hidden"])
+        with open(swizzin.layout_choices.path) as f:
+            self.assertEqual(f.read(), text)
+
+    def test_a_file_of_the_previous_version_without_an_arrangement(self):
+        """An account with its plain name: the page of an account that never arranged anything."""
+        default = self.overview("tester", quota=True)
+        with open(swizzin.layout_choices.path, "w") as f:
+            f.write('{"tester": "overview", "friend": "classic"}')
+        self.assertEqual(self.page("tester", quota=True), default)
 
 if __name__ == "__main__":
     try:

@@ -1,15 +1,20 @@
-/* Top processes, a section of the Details of Overview (templates/overview/processes.html, see the README). While the
-   section is open and the browser tab shows, the page asks /stats/processes (core/processes.py) at once, then every
-   5 seconds, and fills two lists: the 5 programs that used the most CPU, and the 5 that use the most memory. Closed,
-   or the tab hidden, it asks nothing: the panel reads no process for it. The admin sees every program, another
-   account its own. The names come from the system: text only, never HTML. A failed request says so and asks again a
-   little later; 401 (logged out) goes to the logout page, as the dashboard's other refreshes do. */
+/* Top processes, a section of the Details of Overview (templates/overview/processes.html, see the README), open by
+   default (core/overview_blocks.py). While the section is open and the browser tab shows, the page asks
+   /stats/processes (core/processes.py) at once, then every 5 seconds, and fills two lists: the 5 programs that used
+   the most CPU, and the 5 that use the most memory. Closed, hidden with Customize, or the tab hidden, it asks nothing:
+   the panel reads no process for it. The admin sees every program, another account its own. The names come from the
+   system: text only, never HTML. A failed request says so and asks again a little later; 401 (logged out) goes to the
+   logout page, as the dashboard's other refreshes do. */
 (function () {
   'use strict';
 
   var box = document.getElementById('ov-processes');
   if (!box) { return; }  // TOP_PROCESSES = False in swizzin.cfg: no section
   var section = box.parentNode;  // its <details>
+  var shown = true;  // false in a block hidden with Customize (templates/overview.html): in the page, unseen
+  for (var e = section; e && e.hasAttribute; e = e.parentNode) {  // its elements, up to the document
+    if (e.hasAttribute('hidden')) { shown = false; }
+  }
   var EVERY = 5000, RETRY = 15000;  // ms
   var LISTS = ['cpu', 'memory'];
   var MESSAGES = {
@@ -125,7 +130,7 @@
 
   // Start or stop asking, as the section and the browser tab say.
   function update() {
-    var wanted = section.open && !document.hidden;
+    var wanted = shown && section.open && !document.hidden;
     if (wanted === running) { return; }
     running = wanted;
     run += 1;
@@ -137,5 +142,5 @@
 
   section.addEventListener('toggle', update);
   document.addEventListener('visibilitychange', update);
-  update();  // open already when the browser remembers it so (static/js/overview.js, loaded before)
+  update();  // open already by default, or when the browser remembers it so (static/js/overview.js, loaded before)
 })();

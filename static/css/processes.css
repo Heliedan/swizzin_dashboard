@@ -20,6 +20,14 @@
 .ov-processes-track { display: block; height: 6px; border-radius: 3px; background-color: #444; overflow: hidden; }
 .ov-processes-fill { display: block; height: 100%; background-color: #5dade2; }
 .ov-processes-empty { margin-bottom: 0.25rem; font-size: 0.875rem; color: #b0b0b0; }
+/* Across the whole width of Details (the container ov-wide, static/css/overview.css): By CPU and By memory side by
+   side once each list has 520 px or so, enough for a long name next to the numbers and the bar (the columns of a
+   table are of equal width, static/css/swizzin.css); one under the other when Details is narrower (an iPad, a
+   laptop with the sidebar shown, a phone), or in a browser without container queries. */
+@container ov-wide (min-width: 1100px) {
+  .ov-processes-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px;
+    align-items: start; }
+}
 
 @media (max-width: 575.98px) {
   .ov-processes-bar { display: none; }

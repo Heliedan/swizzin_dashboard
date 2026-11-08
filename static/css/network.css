@@ -1,0 +1,33 @@
+/* Network Info across the whole width of Details, on Overview (templates/overview/network.html): the card of Classic,
+   unchanged (templates/netinfo.html, and templates/top.html, which /stats/vnstat puts in #top10), its tables side by
+   side rather than one under the other, as the width of Details allows (the container ov-wide,
+   static/css/overview.css). #top10 gives its children to the grid of the card (display: contents), each in its place:
+     from 860 px, two columns: the speed of the interface, the periods, then the top transfer days | the Days and
+     Months tabs, as tall as the first column (their list scrolls past about ten entries);
+     from 1200 px, three: the speed, then the periods | the Days and Months tabs | the top transfer days.
+   Each tab and the title of the top days sit just above their table, so that the tables of a line start together.
+   Side by side, each column of the tables of vnstat is as wide as its text needs (static/css/swizzin.css makes them
+   all equal), so that a date and its three amounts keep to one line. On a shared server, the bandwidth used by the
+   account stays across the top; a sentence of vnstat (no data...) goes next to the speed. Narrower than 860 px (an
+   iPad with the sidebar shown, a phone), side by side would crowd the numbers: one under the other, as in Classic;
+   so too in a browser without container queries. Only Overview loads this file. */
+@container ov-wide (min-width: 860px) {
+  .ov-section[data-section="network"] > .card > .card-body { display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
+  .ov-section[data-section="network"] #top10 { display: contents; }
+  .ov-section[data-section="network"] .card-body > :not(table):not(#top10) { grid-column: 1 / -1; }
+  .ov-section[data-section="network"] .card-body > table { grid-column: 1; grid-row: 4; }
+  .ov-section[data-section="network"] #top10 > p { grid-column: 2 / -1; grid-row: 4; }
+  .ov-section[data-section="network"] #top10 > table:first-child { grid-column: 1; grid-row: 5; }
+  .ov-section[data-section="network"] #top10 > .bw-tabs { grid-column: 2; grid-row: 4; align-self: end; }
+  .ov-section[data-section="network"] #top10 > .tab-content { grid-column: 2; grid-row: 5 / span 3; }
+  .ov-section[data-section="network"] #top10 > div.text-center { grid-column: 1; grid-row: 6; }
+  .ov-section[data-section="network"] #top10 > div.text-center + table { grid-column: 1; grid-row: 7; }
+  .ov-section[data-section="network"] #top10 .table { table-layout: auto; }
+}
+@container ov-wide (min-width: 1200px) {
+  .ov-section[data-section="network"] > .card > .card-body { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-section[data-section="network"] #top10 > .tab-content { grid-row: 5; }
+  .ov-section[data-section="network"] #top10 > div.text-center { grid-column: 3; grid-row: 4; align-self: end; }
+  .ov-section[data-section="network"] #top10 > div.text-center + table { grid-column: 3; grid-row: 5; }
+}

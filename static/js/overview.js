@@ -1,10 +1,12 @@
 /* The Overview layout of the dashboard (templates/overview.html, see the README): what the other scripts do not do.
    The tiles are filled by static/js/live_stats.js and their small graphs drawn by static/js/live_graphs.js.
 
-   Details: each card of the Classic layout is in a section (a <details> element: the keyboard and screen readers
-   know it), closed when the page loads unless this browser remembers it open. The open sections are kept in the
-   browser's storage (localStorage, key "overview.open", their names comma separated). Blocked or absent storage
-   (private browsing...) only means that they all start closed.
+   Details: each card is in a section (a <details> element: the keyboard and screen readers know it), open or closed
+   by default as the panel renders it ("open" in core/overview_blocks.py), unless this browser remembers it otherwise.
+   The browser's storage keeps what differs from the default, the sections' names comma separated: localStorage
+   "overview.open", the sections opened among those closed by default, and "overview.closed", those closed among those
+   open by default. A key is written only when it changes. Blocked or absent storage (private browsing...) only means
+   that each one starts as it is by default.
 
    Network: the totals of this hour, today, this month and all time, under the bandwidth graph. They are read from the
    bandwidth card of the Details (#top10, templates/top.html) each time the dashboard's own refresh fills it, every 10
@@ -12,15 +14,17 @@
 (function () {
   'use strict';
 
-  var KEY = 'overview.open';
+  var OPENED = 'overview.open', CLOSED = 'overview.closed';  // localStorage
   var PERIODS = ['hour', 'day', 'month', 'alltime'];  // data-period of the rows of templates/top.html
   var NONE = '--';
 
-  function recall() {
-    try { return String(window.localStorage.getItem(KEY) || '').split(','); } catch (e) { return []; }
+  function recall(key) {
+    try { return String(window.localStorage.getItem(key) || ''); } catch (e) { return ''; }
   }
-  function remember(names) {
-    try { window.localStorage.setItem(KEY, names.join(',')); } catch (e) { /* forgotten */ }
+  function remember(key, names) {
+    var value = names.join(',');
+    if (value === recall(key)) { return; }
+    try { window.localStorage.setItem(key, value); } catch (e) { /* forgotten */ }
   }
 
   function setText(id, value) {
@@ -30,12 +34,17 @@
 
   function sections() {
     var all = Array.prototype.slice.call(document.querySelectorAll('.ov-section'));
+    var byDefault = all.map(function (s) { return s.open; });  // as the panel rendered them
     function name(s) { return s.getAttribute('data-section'); }
-    var open = recall();
-    all.forEach(function (s) {
-      if (open.indexOf(name(s)) >= 0) { s.open = true; }
+    function changed(open) {  // the sections that are `open` (or not) against their default
+      return all.filter(function (s, i) { return s.open === open && byDefault[i] !== open; }).map(name);
+    }
+    var opened = recall(OPENED).split(','), closed = recall(CLOSED).split(',');
+    all.forEach(function (s, i) {
+      s.open = byDefault[i] ? closed.indexOf(name(s)) < 0 : opened.indexOf(name(s)) >= 0;
       s.addEventListener('toggle', function () {
-        remember(all.filter(function (x) { return x.open; }).map(name));
+        remember(OPENED, changed(true));
+        remember(CLOSED, changed(false));
       });
     });
   }
