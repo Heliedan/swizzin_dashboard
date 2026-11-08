@@ -1,7 +1,7 @@
 """The section Panel sign-ins (static/js/signins.js), run for real in Node.js on the Overview page the panel renders,
 in the fake DOM of tests/fake_dom.js, with static/js/overview.js which opens and closes the sections: when it asks, what
-it shows, and that it inserts text only. Skipped when node is not installed, except with REQUIRE_NODE=1 (the automatic
-tests).
+it shows, and that it inserts text only. The tests show the section with Customize (SHOWN), whatever it is by default,
+but those of a hidden section. Skipped when node is not installed, except with REQUIRE_NODE=1 (the automatic tests).
 
 Run from the repository root: python tests/test_signins_js.py
 (uses a throwaway htpasswd file: nothing on the machine is touched)."""
@@ -18,11 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The page, the fake DOM and its runner are those of the disk banner's tests. Importing them points the panel to a
 # throwaway htpasswd file (the admin "tester", and "friend") and writes swizzin.cfg, removed at the end.
 from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin  # noqa: E402
+from core import layouts, overview_blocks  # noqa: E402
 
 _tmp = tempfile.mkdtemp()
 swizzin.layout_choices.path = os.path.join(_tmp, "layouts.json")
 SCRIPTS = [os.path.join(ROOT, "static", "js", name) for name in ("overview.js", "signins.js")]
 STORE_KEY = "overview.open"  # the open sections, kept by static/js/overview.js
+SHOWN = {"shown": ["signins"]}  # the section shown with Customize when it is hidden by default (the default otherwise)
 # Run after the scripts, in the page (the "poll" of tests/fake_dom.js): notes in attributes of #ov-signins, which the
 # snapshots give: the delay of each timer the script sets, where window.location.replace() sends the page, how many
 # times the lists changed, and each list as [cell class, its text, class and text of its second line, elements in it]
@@ -97,9 +99,12 @@ class SigninsJs(unittest.TestCase):
         if not NODE:
             raise RuntimeError("node is not installed, and REQUIRE_NODE=1: these tests must run here")
 
-    def run_page(self, steps, user="tester", storage=None):
-        """The account's Overview with these scripts, in the fake DOM: a snapshot after loading and after each step."""
-        with mock.patch.object(swizzin.layout_choices, "get", return_value="overview"):
+    def run_page(self, steps, user="tester", storage=None, arrangement=SHOWN):
+        """The account's Overview (with `arrangement`, as POST /layout/arrange takes it) with these scripts, in the fake
+        DOM: a snapshot after loading and after each step."""
+        with mock.patch.object(swizzin.layout_choices, "get", return_value="overview"), \
+                mock.patch.object(swizzin.layout_choices, "arrangement",
+                                  return_value=arrangement and layouts.checked(arrangement)):
             page = dashboard(user, ["/"], False)
         tree = Tree()
         tree.feed(page)
@@ -172,6 +177,41 @@ class WhenItAsks(SigninsJs):
     def test_logged_out(self):
         snap = self.run_page([OPEN, {"event": "answer-401"}])[-1]
         self.assertEqual(self.attr(snap, "data-left-for"), "/logout")
+
+    def test_hidden_by_default(self):
+        """Panel sign-ins are hidden by default ("hidden" in core/overview_blocks.py): the section is in the page, but
+        nobody sees it."""
+        self.assertTrue(next(b for b in overview_blocks.BLOCKS if b["id"] == "signins").get("hidden"))
+        snap = self.run_page([], arrangement=None)[0]
+        self.assertIn("signins", snap["sections"])
+        self.assertEqual(snap["sent"], [])
+
+    def test_hidden_it_asks_nothing(self):
+        """Hidden, by default or with Customize: no request, not when the browser remembers it open, not when it is
+        opened all the same (by a script), not a minute later, never a timer; shown with Customize, it asks as the page
+        loads."""
+        for arrangement in (None, {"hidden": ["signins"]}):  # the default; hidden with Customize, whatever the default
+            for storage in ({}, {STORE_KEY: "signins"}):
+                with self.subTest(arrangement=arrangement, storage=storage):
+                    snaps = self.run_page([OPEN, {"timer": True}, OPEN, OPEN, {"timer": True}], storage=storage,
+                                          arrangement=arrangement)
+                    self.assertEqual(snaps[0]["sections"]["signins"], STORE_KEY in storage)  # in the page
+                    self.assertTrue(any(s["sections"]["signins"] for s in snaps))  # opened at some step
+                    for snap in snaps:
+                        self.assertEqual(snap["sent"], [])
+                        self.assertIsNone(self.attr(snap, "data-delays"))
+                    self.assertEqual(snaps[-1]["watch"]["ov-signins-message"], "Loading…")  # nothing read
+        loaded = self.run_page([], storage={STORE_KEY: "signins"})[0]  # shown: it asks
+        self.assertEqual(self.asked(loaded), ["/signins"])
+
+    def test_the_other_blocks_hidden_change_nothing(self):
+        """Only the block that holds the section matters: shown, it asks, every other section of Details hidden (by
+        default, or with Customize)."""
+        others = [b["id"] for b in overview_blocks.BLOCKS
+                  if b["zone"] in ("left", "right", "wide") and b["id"] != "signins" and not b.get("hidden")]
+        loaded = self.run_page([], storage={STORE_KEY: "signins"}, arrangement=dict(SHOWN, hidden=others))[0]
+        self.assertEqual(self.asked(loaded), ["/signins"])
+        self.assertEqual(loaded["sections"]["signins"], True)
 
     def test_a_failed_request(self):
         """It says so, keeps the lists shown, and tries again a minute later."""

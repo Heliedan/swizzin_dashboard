@@ -2,8 +2,8 @@
    place of the Classic cards. At a glance: four tiles (CPU, Memory, Disk /, Network), each with its level in words and
    its last 5 minutes. Then the bandwidth graph with the totals of vnstat, next to the services; then Details: the
    cards of the Classic layout and a few more, each in a section, closed by default unless core/overview_blocks.py
-   says "open" (Top processes and Network Info, across the whole width of Details); CPU Info and RAM Info are hidden
-   by default (they repeat the CPU and Memory tiles).
+   says "open" (Network Info and Top processes, across the whole width of Details); those it says "hidden" are hidden
+   by default (CPU Info and RAM Info, which repeat the CPU and Memory tiles, Disk Info and Panel sign-ins).
    Same data, same rights, same element ids and the same scripts as Classic. The tiles are filled by
    static/js/live_stats.js, their small graphs by static/js/live_graphs.js, the totals and the sections by
    static/js/overview.js; the look is in static/css/overview.css.
@@ -67,7 +67,7 @@
      otherwise (static/js/overview.js). A card's own header gives way to the section's. On a wide screen, two columns
      that stack on their own: the machine on the left, the disks on the right, so that a section opened in one column
      moves nothing in the other; one column, in the same order, on a narrower screen. Then the sections that take the
-     whole width (zone "wide": Top processes, Network Info), their content laid out across it when it is wide enough
+     whole width (zone "wide": Network Info, Top processes), their content laid out across it when it is wide enough
      (static/css/processes.css, static/css/network.css). live-stack: where static/js/live_stats.js reads the address of
      the panel. #}
   <section class="ov-block" aria-labelledby="ov-details">

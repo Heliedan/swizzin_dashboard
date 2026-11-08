@@ -3,10 +3,11 @@
    name when it is an account, address, how many, and for how long the login protection then refused the address).
 
    They come from /signins when the section is opened, or when the page loads with it open, then every minute while it
-   stays open: a closed section asks nothing. One request at a time. 401 (logged out) goes to the logout page, as the
-   dashboard's other refreshes do; another failure says so, keeps the lists shown, and tries again a minute later. The
-   address of this browser, as the panel sees it, is marked "your address" (other devices behind the same router share
-   it). Times in the browser's time zone. Text only, never HTML. */
+   stays open: a closed section asks nothing, nor does a hidden one (by default or with Customize), even remembered
+   open. One request at a time. 401 (logged out) goes to the logout page, as the dashboard's other refreshes do; another
+   failure says so, keeps the lists shown, and tries again a minute later. The address of this browser, as the panel
+   sees it, is marked "your address" (other devices behind the same router share it). Times in the browser's time
+   zone. Text only, never HTML. */
 (function () {
   'use strict';
 
@@ -15,6 +16,9 @@
   var section = box.parentNode;  // the <details> of the section
   while (section && section.tagName !== 'DETAILS') { section = section.parentNode; }
   if (!section) { return; }
+  for (var e = section; e && e.hasAttribute; e = e.parentNode) {  // its elements, up to the document
+    if (e.hasAttribute('hidden')) { return; }  // a block hidden (templates/overview.html): in the page, unseen
+  }
   var EVERY = 60000;  // ms
   var LONG = 20;  // characters: a longer address may break anywhere; an IPv4 one never does
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

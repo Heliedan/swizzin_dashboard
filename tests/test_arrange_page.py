@@ -250,11 +250,12 @@ class Page(ArrangeTest):
         hiding = ["disks", "tile-disk", "network", "bandwidth", "system-status"]
         page = self.overview("tester", {"hidden": hiding}, quota=True)
         self.assertEqual(sorted(Ids(page).ids), sorted(before))
-        for block in hiding + BY_DEFAULT:
+        everything = hiding + [i for i in BY_DEFAULT if i not in hiding]  # hidden by the account, or by default
+        for block in everything:
             self.assertEqual(page.count('<div class="ov-hidden-block" data-block="%s" hidden>' % block), 1, block)
         self.assertIn('<div class="ov-hidden-block" data-block="disks" hidden><details class="card ov-section" '
                       'data-section="disks">', page.replace("\n", "").replace("  ", ""))
-        self.assertEqual(page.count("ov-hidden-block"), len(hiding + BY_DEFAULT))
+        self.assertEqual(page.count("ov-hidden-block"), len(everything))
 
     def test_a_column_with_nothing_to_show_is_hidden(self):
         """The other one then takes the whole width of Details; its hidden sections stay in the page. Whatever the
@@ -266,13 +267,16 @@ class Page(ArrangeTest):
         on_wide = [i for i in WIDE if i in shown]
         self.assertTrue(on_left and on_right and on_wide)
         everything = {"shown": BY_DEFAULT}  # each block of the page shown, those hidden by default too
+
+        def hiding(ids):  # each block of the page shown, but `ids`, whatever they are by default
+            return {"hidden": ids, "shown": [i for i in BY_DEFAULT if i not in ids]}
         found = layout(self.overview("tester", dict(everything, other_column=left)))  # not in an order: the list's
         self.assertEqual((found["hidden columns"], found["left"]), (["left"], []))
         self.assertEqual(found["right"], [b["id"] for b in overview_blocks.BLOCKS if b["id"] in on_left + on_right])
-        found = layout(self.overview("tester", dict(everything, hidden=right)))
+        found = layout(self.overview("tester", hiding(right)))
         self.assertEqual((found["hidden columns"], found["left"], found["right"], found["hidden"]),
                          (["right"], on_left, on_right, on_right))
-        found = layout(self.overview("tester", dict(everything, hidden=WIDE)))
+        found = layout(self.overview("tester", hiding(WIDE)))
         self.assertEqual((found["hidden columns"], found["wide"], found["hidden"]), (["wide"], on_wide, on_wide))
         found = layout(self.overview("tester", everything))
         self.assertEqual((found["hidden columns"], found["left"], found["right"], found["wide"], found["hidden"]),
@@ -335,12 +339,12 @@ class Page(ArrangeTest):
         page = self.overview("tester", ARRANGED, quota=True)
         data, found = editor(page), layout(page)
         where = {b["id"]: (b["zone"], b["home"], b["hidden"]) for b in data["blocks"]}
-        for block, expected in (("services", ("row", "row", False)), ("bandwidth", ("row", "row", False)),
-                                ("disks", ("left", "right", False)), ("cpu", ("left", "left", True)),
-                                ("ram", ("left", "left", False)), ("quota", ("right", "right", False)),
-                                ("network", ("wide", "wide", False)), ("processes", ("wide", "wide", False)),
-                                ("signins", ("right", "right", False)), ("tile-disk", ("tiles", "tiles", True))):
-            self.assertEqual(where[block], expected, block)
+        for block, zone, home in (("services", "row", "row"), ("bandwidth", "row", "row"), ("disks", "left", "right"),
+                                  ("cpu", "left", "left"), ("ram", "left", "left"), ("quota", "right", "right"),
+                                  ("network", "wide", "wide"), ("processes", "wide", "wide"),
+                                  ("signins", "right", "right"), ("tile-disk", "tiles", "tiles")):
+            self.assertEqual(where[block], (zone, home, hidden_on([block], ARRANGED) == [block]), block)
+        self.assertEqual((where["cpu"][2], where["ram"][2], where["tile-disk"][2]), (True, False, True))
         known = seen(page)
         for zone in overview_blocks.ZONES:  # the editor's order is the page's (for the blocks layout() can tell)
             self.assertEqual([b["id"] for b in data["blocks"] if b["zone"] == zone and b["id"] in known], found[zone],
@@ -391,8 +395,9 @@ class Page(ArrangeTest):
             page = self.overview("tester", {"order": ["extra", "cpu"], "hidden": ["extra"], "other_column": ["extra"]})
             found = layout(page)
             self.assertEqual(found["left"], ["extra", "cpu"] + [i for i in plain["left"] if i != "cpu"])
+            order = [i for zone in overview_blocks.ZONES for i in found[zone]]
             self.assertEqual((found["right"], found["hidden"]),
-                             (plain["right"], hidden_on(found["left"], {"hidden": ["extra"]})))
+                             (plain["right"], hidden_on(order, {"hidden": ["extra"]})))
             self.assertEqual(found["hidden"][0], "extra")
             self.assertIn("extra-text", Ids(page).ids)
         swizzin.app.jinja_env.cache.clear()  # the page without it again
@@ -499,6 +504,82 @@ class Defaults(ArrangeTest):
         self.assertIn("ram", found["hidden"])
         with open(swizzin.layout_choices.path) as f:
             self.assertEqual(f.read(), text)
+
+    # Written by the previous version (#31, with "shown" and the whole width of Details), as its Customize sends it:
+    # every block of the admin's page, zone by zone, and what differs from that version's defaults (CPU Info and RAM
+    # Info hidden; Top processes before Network Info). One hid Disk Info and Panel sign-ins and put Network Info first,
+    # as the defaults are now; the other showed CPU Info again and left the rest where it was.
+    PREVIOUS_ORDER = ["system-status", "tile-cpu", "tile-ram", "tile-disk", "tile-net", "bandwidth", "services", "cpu",
+                      "ram", "disks", "quota", "signins"]
+    AS_THE_DEFAULT = {"order": PREVIOUS_ORDER + ["network", "processes"], "hidden": ["signins", "disks"], "shown": [],
+                      "other_column": []}
+    CPU_SHOWN = {"order": PREVIOUS_ORDER + ["processes", "network"], "hidden": [], "shown": ["cpu"],
+                 "other_column": []}
+
+    def write(self, value):
+        """The file of choices with `value` as the arrangement of "tester" (Overview), and "friend" on Classic."""
+        text = json.dumps({"tester": {"layout": "overview", "overview": value}, "friend": "classic"})
+        with open(swizzin.layout_choices.path, "w") as f:
+            f.write(text)
+        return text
+
+    def test_an_arrangement_of_the_previous_version_as_the_defaults_are_now(self):
+        """Read as the default arrangement: the page of an account that never arranged anything, byte for byte, with
+        and without a quota, and reading writes nothing. Choosing a layout keeps it in the file as it was; Customize
+        sending it again (Done) or Reset gives the account its plain name back."""
+        for quota in (False, True):
+            with self.subTest(quota=quota):
+                default = self.overview("tester", quota=quota)
+                text = self.write(self.AS_THE_DEFAULT)
+                self.assertEqual(kept("tester"), ("overview", None))
+                self.assertEqual(self.page("tester", quota=quota), default)
+                with open(swizzin.layout_choices.path) as f:
+                    self.assertEqual(f.read(), text)
+        swizzin.layout_choices.set("tester", "classic")
+        self.assertEqual(self.choices()["tester"], {"layout": "classic", "overview": self.AS_THE_DEFAULT})
+        swizzin.layout_choices.set("tester", "overview")
+        self.assertEqual(self.choices()["tester"], {"layout": "overview", "overview": self.AS_THE_DEFAULT})
+        for body in (self.AS_THE_DEFAULT, {"reset": True}):
+            with self.subTest(body=body):
+                self.write(self.AS_THE_DEFAULT)
+                r = self.arrange("tester", body)
+                self.assertEqual((r.status_code, r.get_json()), (200, {"arrangement": None}))
+                self.assertEqual(self.choices(), {"tester": "overview", "friend": "classic"})
+
+    def test_an_arrangement_of_the_previous_version_that_showed_a_block(self):
+        """It keeps its order (Top processes before Network Info) and what it showed (CPU Info); it said nothing of Disk
+        Info and Panel sign-ins, which get their default: hidden, as for everyone. Reading writes nothing."""
+        text = self.write(self.CPU_SHOWN)
+        found = layout(self.page("tester", quota=True))
+        self.assertEqual(found["wide"], ["processes", "network"])
+        self.assertEqual(found["right"], ["disks", "quota", "signins"])
+        self.assertEqual(found["hidden"], ["ram", "disks", "signins"])
+        self.assertEqual(found["hidden columns"], [])
+        self.assertEqual(kept("tester"), ("overview", self.CPU_SHOWN))
+        with open(swizzin.layout_choices.path) as f:
+            self.assertEqual(f.read(), text)
+
+    def test_disk_info_shown_again_stays_shown(self):
+        """Disk Info, hidden by default, shown again with Customize ("shown"): in its column, which shows again, open
+        or closed as before; kept in the file, it stays shown when the page loads again and after choosing Classic and
+        Overview again. Panel sign-ins, which the account said nothing of, stay hidden. Hidden again, and the default
+        page comes back."""
+        default = self.overview("tester")
+        page = self.overview("tester", {"shown": ["disks"]})
+        found = layout(page)
+        self.assertNotIn("disks", found["hidden"])
+        self.assertIn("signins", found["hidden"])
+        self.assertNotIn("right", found["hidden columns"])
+        self.assertIn('<details class="card ov-section" data-section="disks"><summary', page)
+        arrangement = {"order": [], "hidden": [], "shown": ["disks"], "other_column": []}
+        self.assertEqual(self.choices()["tester"], {"layout": "overview", "overview": arrangement})
+        swizzin.layout_choices.set("tester", "classic")
+        swizzin.layout_choices.set("tester", "overview")
+        self.assertEqual(self.page("tester"), page)
+        self.assertEqual(kept("tester"), ("overview", arrangement))
+        r = self.arrange("tester", {"hidden": ["disks"]})
+        self.assertEqual((r.status_code, r.get_json()), (200, {"arrangement": None}))
+        self.assertEqual(self.page("tester"), default)
 
     def test_a_file_of_the_previous_version_without_an_arrangement(self):
         """An account with its plain name: the page of an account that never arranged anything."""

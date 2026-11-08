@@ -92,15 +92,23 @@ class Blocks(unittest.TestCase):
         """Its two columns, then its whole width: the last zones of the page."""
         self.assertEqual(ZONES[-3:], DETAILS)
 
-    def test_the_cards_that_repeat_the_tiles_are_hidden_by_default(self):
-        """CPU Info and RAM Info mostly repeat the CPU and Memory tiles: hidden, for whoever wants their detail
-        (Customize shows them again). Disk Info is not: it shows every disk and its speeds. Top processes and Network
-        Info open across the whole width of Details."""
+    def test_the_blocks_hidden_and_open_by_default(self):
+        """Details shows Network Info, then Top processes, open across its whole width. CPU Info and RAM Info (they
+        mostly repeat the CPU and Memory tiles), Disk Info and Panel sign-ins are hidden by default, for whoever wants
+        their detail (Customize shows them again). Disk Quota Info is not: a closed section, when the quota is
+        installed."""
         blocks = {block["id"]: block for block in BLOCKS}
-        self.assertEqual(sorted(i for i, b in blocks.items() if b.get("hidden")), ["cpu", "ram"])
-        self.assertNotIn("hidden", blocks["disks"])
+        self.assertEqual(sorted(i for i, b in blocks.items() if b.get("hidden")), ["cpu", "disks", "ram", "signins"])
+        self.assertNotIn("hidden", blocks["quota"])
         self.assertEqual(sorted(i for i, b in blocks.items() if b.get("open")), ["network", "processes"])
-        self.assertEqual(sorted(b["id"] for b in overview_blocks.zone("wide")), ["network", "processes"])
+        self.assertEqual([b["id"] for b in overview_blocks.zone("wide")], ["network", "processes"])
+
+    def test_the_list_is_in_the_order_of_the_page(self):
+        """Zone after zone, as the page shows them: the order of the list is the one Customize sends for the blocks
+        left where they are (static/js/arrange.js, zone by zone), so that such an arrangement is the default one
+        (core/layouts.py) and the account keeps its plain name."""
+        zones = [block["zone"] for block in BLOCKS]
+        self.assertEqual(zones, sorted(zones, key=ZONES.index))
 
     def test_the_scripts_and_stylesheets_exist_once(self):
         for files, kind in ((overview_blocks.scripts(), ".js"), (overview_blocks.stylesheets(), ".css")):
