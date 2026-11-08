@@ -255,21 +255,43 @@ class Pages(LayoutTest):
     def test_the_details_in_two_columns_then_across(self):
         """Two columns on a wide screen (static/css/overview.css), each stacking on its own: the machine on the left, the
         disks on the right. In one column, on a narrow screen, the same order as Classic's cards. Then the sections
-        across the whole width of Details (Top processes, Network Info). A column whose blocks are all hidden by
-        default (the machine's: they repeat the tiles) is hidden, and the other one takes the width."""
+        across the whole width of Details, in the order of core/overview_blocks.py. A column whose blocks are all
+        hidden by default is hidden, and the other one takes the width."""
         page = self.overview("tester", quota=True)
         details = page[page.index('id="ov-details"'):]
         self.assertIn('<h2 class="ov-title" id="ov-details">Details</h2>\n      <span class="ov-hint">More about the '
                       'server</span>', page)
         found = re.findall(r'class="(live-stack|ov-column|ov-wide)"( hidden)?|data-section="([\w-]+)"', details)
-        self.assertInOrder(["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "ov-wide",
-                            "processes", "network"], [a or c for a, _, c in found])
         wide = [b["id"] for b in overview_blocks.zone("wide")]
+        self.assertInOrder(["live-stack", "ov-column", "cpu", "ram", "ov-column", "disks", "quota", "ov-wide"] + wide,
+                           [a or c for a, _, c in found])
         self.assertEqual([c for a, _, c in found][[a for a, _, c in found].index("ov-wide"):][1:], wide)
         boxes = [f for f in found if f[0] in ("ov-column", "ov-wide")]
         hidden = {a + str(n): bool(h) for n, (a, h, _) in enumerate(boxes)}
-        everything_hidden = all(b.get("hidden") for b in overview_blocks.zone("left"))
-        self.assertEqual(hidden, {"ov-column0": everything_hidden, "ov-column1": False, "ov-wide2": False})
+        rendered = set(c for _, _, c in found if c)
+        everything_hidden = {zone: all(b.get("hidden") for b in overview_blocks.zone(zone) if b["id"] in rendered)
+                             for zone in ("left", "right", "wide")}
+        self.assertEqual(hidden, {"ov-column0": everything_hidden["left"], "ov-column1": everything_hidden["right"],
+                                  "ov-wide2": everything_hidden["wide"]})
+
+    def test_by_default_details_is_its_whole_width(self):
+        """The default page (no arrangement): every section of the two columns is hidden by default but Disk Quota Info,
+        so that without a quota both columns are hidden and Details shows its whole width only (Network Info, then Top
+        processes, open); with one, Disk Quota Info, closed, takes the width of the columns, above them."""
+        for quota, columns in ((False, ["ov-column hidden", "ov-column hidden"]), (True, ["ov-column hidden",
+                                                                                          "ov-column"])):
+            with self.subTest(quota=quota):
+                page = self.overview("tester", quota=quota)
+                details = page[page.index('id="ov-details"'):]
+                found = re.findall(r'class="(ov-column|ov-wide)"( hidden)?|data-section="([\w-]+)"( open)?', details)
+                self.assertEqual([a + h for a, h, _, _ in found if a], columns + ["ov-wide"])
+                wide = details[details.index('class="ov-wide"'):]
+                self.assertEqual(re.findall(r'data-section="([\w-]+)"( open)?', wide),
+                                 [("network", " open"), ("processes", " open")])
+                hidden = re.findall(r'<div class="ov-hidden-block" data-block="([\w-]+)" hidden>', details)
+                self.assertEqual(sorted(hidden), ["cpu", "disks", "ram", "signins"])
+                self.assertEqual('data-section="quota"' in details, quota)
+                self.assertNotIn('data-section="quota" open', details)
 
     def test_the_page_follows_the_list_of_blocks(self):
         """core/overview_blocks.py makes the page: a block moved in the list, or to another zone, moves on the page;

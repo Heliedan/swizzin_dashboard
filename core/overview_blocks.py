@@ -10,7 +10,8 @@ no disk quota...): an account that may not see a block gets nothing from it. Eac
   wide         under the two columns, the sections of Details that take its whole width (their content is laid out
                across it when it is wide enough, in their own stylesheet).
 Two flags give a block's state by default, before an account changes it:
-  hidden       True: the block is hidden by default (it repeats what another one shows); Customize shows it again;
+  hidden       True: the block is hidden by default (it repeats what another one shows, or is seldom needed);
+               Customize shows it again;
   open         True: the section of Details is open by default (its template renders the open attribute from it);
                the browser still remembers it closed when it is closed (static/js/overview.js).
 A new block is one more line here, with its script or its stylesheet if it has one (in static/): templates/index.html
@@ -35,18 +36,20 @@ BLOCKS = [
     {"id": "bandwidth", "zone": "row", "template": "overview/bandwidth.html", "label": "Network"},
     {"id": "services", "zone": "row", "template": "overview/services.html", "label": "Service Info",
      "script": "js/service_logs.js"},
-    # CPU Info and RAM Info mostly repeat the CPU and Memory tiles: hidden by default, for whoever wants their detail
-    # (each core, user, system and I/O wait, the uptime...).
+    # Hidden by default, for a shorter page: CPU Info and RAM Info mostly repeat the CPU and Memory tiles; Disk Info
+    # and Panel sign-ins are seldom needed at a glance (the disk almost full banner still warns of a full disk).
+    # Customize shows them again, for whoever wants their detail (each core, user, system and I/O wait, the uptime,
+    # every disk and its speeds, the sign-ins).
     {"id": "cpu", "zone": "left", "template": "overview/cpu.html", "label": "CPU Info", "hidden": True},
     {"id": "ram", "zone": "left", "template": "overview/ram.html", "label": "RAM Info", "hidden": True},
-    {"id": "processes", "zone": "wide", "template": "overview/processes.html", "label": "Top processes",
-     "script": "js/processes.js", "stylesheet": "css/processes.css", "open": True},
-    {"id": "disks", "zone": "right", "template": "overview/disks.html", "label": "Disk Info"},
+    {"id": "disks", "zone": "right", "template": "overview/disks.html", "label": "Disk Info", "hidden": True},
     {"id": "quota", "zone": "right", "template": "overview/quota.html", "label": "Disk Quota Info"},
+    {"id": "signins", "zone": "right", "template": "overview/signins.html", "label": "Panel sign-ins",
+     "script": "js/signins.js", "hidden": True},
     {"id": "network", "zone": "wide", "template": "overview/network.html", "label": "Network Info",
      "stylesheet": "css/network.css", "open": True},
-    {"id": "signins", "zone": "right", "template": "overview/signins.html", "label": "Panel sign-ins",
-     "script": "js/signins.js"},
+    {"id": "processes", "zone": "wide", "template": "overview/processes.html", "label": "Top processes",
+     "script": "js/processes.js", "stylesheet": "css/processes.css", "open": True},
 ]
 
 

@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The page, the fake DOM and its runner are those of the disk banner's tests. Importing them points the panel to a
 # throwaway htpasswd file (the admin "tester", and "friend") and writes swizzin.cfg, removed at the end.
 from test_disk_alert_js import FAKE_DOM, NODE, NODE_REQUIRED, ROOT, Tree, dashboard, swizzin  # noqa: E402
-from core import layouts  # noqa: E402
+from core import layouts, overview_blocks  # noqa: E402
 
 _tmp = tempfile.mkdtemp()
 swizzin.layout_choices.path = os.path.join(_tmp, "layouts.json")
@@ -186,7 +186,9 @@ class WhenItAsks(ProcessesTest):
         self.assertTrue(snaps[0]["sections"]["processes"])
         for snap in snaps:
             self.assertEqual((snap["requests"], snap["timers"]), (0, 0))
-        shown = self.run_page([], storage={}, arrangement={"hidden": ["disks"]})[0]  # another block hidden: it asks
+        others = [b["id"] for b in overview_blocks.BLOCKS  # every other section of Details hidden: it asks
+                  if b["zone"] in ("left", "right", "wide") and b["id"] != "processes" and not b.get("hidden")]
+        shown = self.run_page([], storage={}, arrangement={"hidden": others})[0]
         self.assertEqual(self.asked(shown), [URL])
 
     def test_a_hidden_tab_asks_nothing(self):

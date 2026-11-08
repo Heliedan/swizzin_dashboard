@@ -325,6 +325,19 @@ class DefaultsAndShown(LayoutsTest):
                                                "other_column": []})
         self.assertEqual(layouts.checked(dict(value, shown=[])), layouts.read(value))
 
+    def test_each_block_left_in_its_place_is_the_default(self):
+        """Customize sends every block of the page, zone by zone (static/js/arrange.js): an arrangement that leaves each
+        one in its place, hiding and showing only what the defaults do, is the default one, whether it is read from
+        the file (written by an earlier version, whose defaults differed) or sent; the account keeps its plain name.
+        Even when the blocks hidden by default are listed as hidden, and without the blocks a page does not have."""
+        page = [b["id"] for zone in overview_blocks.ZONES for b in overview_blocks.zone(zone)]
+        for value in ({"order": page}, {"order": page, "hidden": BY_DEFAULT, "shown": [], "other_column": []},
+                      {"order": [i for i in page if i not in ("quota", "system-status")], "hidden": BY_DEFAULT[::-1]}):
+            with self.subTest(value=value):
+                self.assertIsNone(layouts.read(value))
+                self.assertIsNone(layouts.checked(value))
+        self.assertIsNotNone(layouts.read({"order": page[::-1]}))  # in another order: an arrangement
+
     def test_a_block_both_hidden_and_shown_is_read_hidden(self):
         both = [BY_DEFAULT[0], "tile-ram"]
         arrangement = layouts.read({"hidden": both, "shown": both + [BY_DEFAULT[-1]]})
