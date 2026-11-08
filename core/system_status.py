@@ -253,12 +253,12 @@ class PendingUpdates:
         except Exception as e:
             result, error = None, "the check failed: %r" % e
         with self.lock:
-            told = self.error
+            # the warning goes out before the check is seen as done: whoever waits for the end finds it logged
+            if error is not None and error != self.error:  # once, not at every try
+                self.logger.warning("Pending updates: %s", error)
             self.key, self.running, self.error = key, False, error
             if result is not None:
                 self.result = result
-        if error is not None and error != told:  # once, not at every try
-            self.logger.warning("Pending updates: %s", error)
 
     def _check(self, apt):
         """{"lists": bool, "total": int, "security": [names]}: what apt-get -s dist-upgrade would install."""
