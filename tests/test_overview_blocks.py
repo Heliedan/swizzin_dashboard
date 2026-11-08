@@ -51,6 +51,12 @@ class Blocks(unittest.TestCase):
             labels = [block["label"] for block in overview_blocks.zone(z)]
             self.assertEqual(len(labels), len(set(labels)), z)
 
+    def test_the_labels_of_details_differ(self):
+        """A section of Details may go to the other column (Customize, static/js/arrange.js): the labels of both
+        columns differ, so that the editor names each one plainly."""
+        labels = [block["label"] for block in overview_blocks.zone("left") + overview_blocks.zone("right")]
+        self.assertEqual(len(labels), len(set(labels)))
+
     def test_each_template_exists_and_each_one_is_listed(self):
         templates = [block["template"] for block in BLOCKS]
         for name in templates:

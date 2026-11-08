@@ -136,3 +136,42 @@
 .ov-tile .live-graph-has-bottom .live-graph-scale { display: block; top: 0; left: 0; width: 2rem; text-align: right;
   color: #b0b0b0; text-shadow: none; font-variant-numeric: tabular-nums; }
 .ov-tile .live-graph-has-bottom .live-graph-bottom { top: auto; bottom: 0; }
+
+/* Customize (static/js/arrange.js): the button at the right end of the heading of At a glance, after the pills when
+   they show, and the editor under that heading. One list per zone, the zones side by side as the width allows; each
+   line, the block's name then its buttons, which go under it on a narrow screen. The buttons are 44 px at least on
+   a touch screen. A hidden block: "Hidden" after its name, and its Hide button pressed. The button is taller than
+   the title: centred, with negative margins, it leaves the heading as high as before, and the page where it was. */
+.ov-heading > .ov-customize { align-self: center; margin: -4px 0 -4px auto; }
+.ov-heading > .ov-status:not([hidden]) + .ov-customize { margin-left: 0; }
+.ov-arrange { margin-bottom: 1rem; }
+.ov-arrange:focus:not(:focus-visible) { outline: none; }
+.ov-arrange:focus-visible { outline: 2px solid #5dade2; outline-offset: 2px; }
+.ov-arrange-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.ov-arrange-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ov-arrange-help, .ov-arrange-message { margin-bottom: 0.75rem; font-size: 0.875rem; }
+.ov-arrange-help { color: #b0b0b0; }
+.ov-arrange-message:empty { display: none; }
+.ov-arrange-zones { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 12px 16px; align-items: start; }
+.ov-arrange-zone-title { margin: 0 0 6px; font-size: 0.8125rem; font-weight: 400; color: #b0b0b0;
+  text-transform: uppercase; letter-spacing: 1px; }
+.ov-arrange-list { list-style: none; margin: 0; padding: 0; min-height: 2.5rem; }
+.ov-arrange-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 6px;
+  padding: 6px 8px; background-color: #303030; border: 1px solid #444; border-radius: 6px; }
+.ov-arrange-label { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.ov-arrange-item[data-hidden] .ov-arrange-label { color: #b0b0b0; }
+.ov-arrange-tag { margin-left: 0.5rem; font-size: 0.75rem; font-weight: 700; line-height: 1.4; color: #1e1e1e;
+  background-color: #b0b0b0; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.ov-arrange-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.ov-arrange-tools .btn { min-width: 2.25rem; }
+.ov-arrange-move { font-weight: 700; }
+.ov-arrange-hide[aria-pressed="true"] { color: #1e1e1e; background-color: #b0b0b0; border-color: #b0b0b0; }
+.ov-arrange .btn[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+@media (pointer: coarse) {
+  .ov-arrange .btn { min-width: 44px; min-height: 44px; }
+}
+/* An arrangement may put Service Info before the bandwidth graph: the graph keeps its width when it is the last card
+   of the row, and the panel of the logs stays under both. */
+.ov-row > .card.ov-network { flex: 2 1 560px; }
+.ov-row > .ov-logs { order: 1; }
