@@ -1,7 +1,8 @@
-"""heliedan.sh: status, remove-store and revert, on a fake Swizzin server with Heliedan's edition installed.
+"""heliedan.sh: status, enable-store, remove-store and revert, on a fake Swizzin server with Heliedan's edition
+installed, its journal reader and its App Store turned on.
 
-The script's functions run against a fake root (its paths are moved there, systemctl is a fake), with the real App
-Store helper when a test needs one that answers. Swizzin's own `box remove panel` and `box upgrade panel` are
+The script's functions run against a fake root (its paths are moved there, systemctl, userdel and the installers of the
+two services are fakes), with the real App Store helper when a test needs one that answers. Swizzin's own `box remove panel` and `box upgrade panel` are
 replayed from a copy of Swizzin (SWIZZIN_SRC, as for tests/test_removable.py), their paths moved under the fake root:
 those tests are skipped without it, except with REQUIRE_SWIZZIN_SRC=1 (the automatic tests), where they fail.
 
@@ -52,12 +53,14 @@ case ${args[0]:-} in
         ((quiet)) || echo "$state"
         [[ $state == active ]] ;;
     disable)
-        [[ -e $units/$unit.service ]] || { echo "Failed to disable unit: Unit file $unit.service does not exist." >&2; exit 1; }
-        rm -f "$units/multi-user.target.wants/$unit.service"
+        file=$unit.service; [[ $unit == *.socket ]] && file=$unit
+        [[ -e $units/$file ]] || { echo "Failed to disable unit: Unit file $file does not exist." >&2; exit 1; }
+        rm -f "$units/multi-user.target.wants/$file" "$units/sockets.target.wants/$file"
         if ((now)); then stop; fi ;;
     stop) stop ;;
     start|restart) mkdir -p "$run"; touch "$run/$unit.active" ;;
     daemon-reload|reset-failed) ;;
+    enable) mkdir -p "$run"; touch "$run/$unit.enabled" ;;
     *) echo "fake systemctl: $*" >&2; exit 1 ;;
 esac
 """
@@ -79,11 +82,27 @@ STORE_UNIT=$R/etc/systemd/system/swizzin-store.service
 STORE_FILES=("$STORE_UNIT" "$R/etc/systemd/system/multi-user.target.wants/swizzin-store.service"
              "$R/etc/needrestart/conf.d/swizzin-store.conf")
 STORE_SOCKET=$TEST_SOCKET
+JOURNAL_LIB=$R/usr/local/lib/swizzin-journal
+JOURNAL_FILES=("$R/etc/systemd/system/swizzin-journal.socket" "$R/etc/systemd/system/swizzin-journal@.service"
+               "$R/etc/systemd/system/sockets.target.wants/swizzin-journal.socket")
+JOURNAL_USER=heliedan-test-no-such-user  # never a real account of this machine
 PANEL_USER=$TEST_USER
 need_root() { :; }                     # run as root or not: the paths are the tests' own
 git_panel() { git -C "$PANEL" "$@"; }  # no swizzin user here
 py_panel() { "$PYTHON" "$@"; }
 sleep() { :; }
+# The installers of the two services: their pieces put in place under the fake root (as their install.sh would), and
+# the service running; $FAKE_STATE/<folder>.fails makes one fail.
+run_installer() {
+    echo "run_installer $1" >> "$FAKE_STATE/calls.log"
+    [[ ! -e $FAKE_STATE/$1.fails ]] || return 1
+    if [[ $1 == store-helper ]]; then
+        mkdir -p "$STORE_LIB" "$(dirname "${STORE_FILES[1]}")"; touch "$STORE_UNIT"; systemctl restart swizzin-store
+    else
+        mkdir -p "$JOURNAL_LIB" "$(dirname "${JOURNAL_FILES[2]}")"; touch "${JOURNAL_FILES[@]}"
+        systemctl restart swizzin-journal.socket
+    fi
+}
 "${TEST_CALL:-main}" "${args[@]}"
 """
 
@@ -99,6 +118,9 @@ chown() { :; }
 STORE_PIECES = ("etc/systemd/system/swizzin-store.service", "etc/systemd/system/multi-user.target.wants/swizzin-store.service",
                 "etc/needrestart/conf.d/swizzin-store.conf", "etc/systemd/system/swizzin-store.service.d",
                 "usr/local/lib/swizzin-store")
+JOURNAL_PIECES = ("etc/systemd/system/swizzin-journal.socket", "etc/systemd/system/swizzin-journal@.service",
+                  "etc/systemd/system/sockets.target.wants/swizzin-journal.socket", "usr/local/lib/swizzin-journal")
+CFG = "# the admin's own settings\nADMIN_USER = 'tester'\nAPP_STORE = True\n"
 
 
 def redirected(text):
@@ -128,7 +150,8 @@ def write(path, text=""):
 
 class Server:
     """A Swizzin server where heliedan.sh installed the edition: the panel (a clone of the official one, switched to
-    the edition), its backup, Swizzin's lock, and the App Store service as store-helper/install.sh puts it."""
+    the edition), its backup, Swizzin's lock, the journal reader as journal-helper/install.sh puts it, and the App
+    Store turned on (enable-store): its service as store-helper/install.sh puts it, APP_STORE = True in swizzin.cfg."""
 
     def __init__(self, base):
         self.base, self.root = base, os.path.join(base, "root")
@@ -146,10 +169,13 @@ class Server:
               % git(self.panel, "rev-parse", "HEAD"))
         git(self.panel, "checkout", "-q", "-b", "heliedan")  # heliedan.sh: no upstream, as after checkout -B FETCH_HEAD
         write(os.path.join(self.panel, "core", "custom", "store", "__init__.py"), "# the App Store page\n")
-        shutil.copytree(os.path.join(ROOT, "store-helper"), os.path.join(self.panel, "store-helper"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        for folder in ("store-helper", "journal-helper"):
+            shutil.copytree(os.path.join(ROOT, folder), os.path.join(self.panel, folder),
+                            ignore=shutil.ignore_patterns("__pycache__"))
         git(self.panel, "add", "-A")
         git(self.panel, "commit", "-q", "-m", "edition")
+        write(self.cfg, CFG)  # not tracked, as on a real server
+        os.chmod(self.cfg, 0o640)
         write(self.path("/install/.panel.lock"))
         hour_ago = os.stat(self.path("/var/backups/heliedan/original.info")).st_mtime - 3600
         os.utime(self.path("/install/.panel.lock"), (hour_ago, hour_ago))  # the panel was there before the backup
@@ -167,15 +193,31 @@ class Server:
         for name in ("swizzin_store.py", "removable.py", "remove_runner.py", "check_app.py"):
             shutil.copy(os.path.join(ROOT, "store-helper", name), self.path("/usr/local/lib/swizzin-store/"))
         os.makedirs(self.path("/var/log/swizzin-store"))  # kept by every removal
+        # the journal reader
+        for name in ("swizzin-journal.socket", "swizzin-journal@.service"):
+            shutil.copy(os.path.join(ROOT, "journal-helper", name), self.path("/etc/systemd/system/"))
+        os.makedirs(self.path("/etc/systemd/system/sockets.target.wants"))
+        os.symlink("../swizzin-journal.socket", self.path("/etc/systemd/system/sockets.target.wants/swizzin-journal.socket"))
+        os.makedirs(self.path("/usr/local/lib/swizzin-journal"))
+        shutil.copy(os.path.join(ROOT, "journal-helper", "swizzin_journal.py"), self.path("/usr/local/lib/swizzin-journal/"))
         self.bin = os.path.join(base, "bin")
         write(os.path.join(self.bin, "systemctl"), FAKE_SYSTEMCTL)
         os.chmod(os.path.join(self.bin, "systemctl"), 0o755)
         os.makedirs(os.path.join(base, "run"))
         self.set_running("panel")
+        self.set_running("swizzin-journal.socket")
         self.socket = os.path.join(base, "no-helper.sock")  # until a test starts a real helper
 
     def path(self, p):
         return os.path.join(self.root, p.lstrip("/"))
+
+    @property
+    def cfg(self):
+        return os.path.join(self.panel, "swizzin.cfg")
+
+    def read_cfg(self):
+        with open(self.cfg) as f:
+            return f.read()
 
     def set_running(self, unit, running=True, stuck=False):
         for name, on in ((unit + ".active", running), (unit + ".stuck", stuck)):
@@ -208,6 +250,9 @@ class Server:
 
     def store_left(self):
         return [p for p in STORE_PIECES if os.path.lexists(self.path(p))]
+
+    def journal_left(self):
+        return [p for p in JOURNAL_PIECES if os.path.lexists(self.path(p))]
 
     def swizzin(self, script):
         """Swizzin's own script (scripts/remove/panel.sh or scripts/upgrade/panel.sh), run on this server."""
@@ -280,8 +325,20 @@ class Status(HeliedanTest):
         self.assertEqual(code, 0, out)
         self.assertIn("Panel: Heliedan's edition", out)
         self.assertIn("App Store service: active", out)
+        self.assertIn("Journal reader (Logs buttons): active", out)
+        self.assertIn("App Store: on (APP_STORE = True in swizzin.cfg)", out)
         self.assertNotIn("LEFT BEHIND", out)
         self.assertIn("Backup of the panel from before the switch", out)
+
+    def test_the_default_without_the_app_store(self):
+        """What install leaves on a new server: the journal reader, no App Store."""
+        remove_pieces(self.server)
+        write(self.server.cfg, "# the admin's own settings\n")
+        code, out = self.server.heliedan("status")
+        self.assertEqual(code, 0, out)
+        self.assertIn("App Store service: not installed", out)
+        self.assertIn("Journal reader (Logs buttons): active", out)
+        self.assertIn("App Store: off (sudo bash heliedan.sh enable-store turns it on)", out)
 
     def test_no_service(self):
         remove_pieces(self.server)
@@ -298,6 +355,8 @@ class Status(HeliedanTest):
         self.assertEqual(code, 0, out)  # it used to stop at "no Swizzin panel"
         self.assertIn("Panel: not installed", out)
         self.assertIn("App Store service: LEFT BEHIND (inactive)", out)
+        self.assertIn("Journal reader (Logs buttons): LEFT BEHIND", out)
+        self.assertNotIn("App Store: o", out)  # no panel: no setting to show
         self.assertIn("heliedan.sh remove-store", out)
 
     @unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
@@ -367,14 +426,18 @@ class RemoveStore(HeliedanTest):
         self.assertEqual(code, 0, out)
         self.assert_removed(out)
         self.assertIn("Done: the App Store service is removed", out)
+        self.assertEqual(self.server.journal_left(), [], out)  # what the edition left behind goes too
+        self.assertFalse(self.server.running("swizzin-journal.socket"))
         self.assertIn("The backup of the official panel stays in", out)
         calls = len(self.server.calls())
         code, out = self.server.heliedan("remove-store")  # idempotent
         self.assertEqual(code, 0, out)
         self.assertIn("not installed: nothing to remove", out)
-        self.assertEqual(self.server.calls()[calls:], ["systemctl is-active --quiet swizzin-store"])  # only a look
+        self.assertEqual(set(self.server.calls()[calls:]), {"systemctl is-active --quiet swizzin-store",
+                                                            "systemctl is-active --quiet swizzin-journal.socket"})
         code, out = self.server.heliedan("status")
         self.assertIn("App Store service: not installed", out)
+        self.assertIn("Journal reader (Logs buttons): not installed", out)
 
     def test_before_box_remove_panel(self):
         """The order the README gives: remove-store first, while the panel is still there and the service runs."""
@@ -382,8 +445,21 @@ class RemoveStore(HeliedanTest):
         code, out = self.server.heliedan("remove-store")
         self.assertEqual(code, 0, out)
         self.assert_removed(out)
-        self.assertIn("The panel is still Heliedan's edition", out)
-        self.assertTrue(os.path.exists(self.server.panel))  # the panel itself is not touched
+        self.assertIn("The panel is still Heliedan's edition, with its Logs buttons", out)
+        self.assertTrue(os.path.exists(self.server.panel))  # the panel's code is not touched
+        # the App Store turned off for the panel, which restarts without it; the journal reader stays
+        self.assertEqual(self.server.read_cfg(), "# the admin's own settings\nADMIN_USER = 'tester'\nAPP_STORE = False"
+                         "  # the App Store: heliedan.sh enable-store and remove-store change it\n")
+        self.assertIn("systemctl restart panel", self.server.calls())
+        self.assertEqual(len(self.server.journal_left()), len(JOURNAL_PIECES))
+        self.assertTrue(self.server.running("swizzin-journal.socket"))
+        code, out = self.server.heliedan("status")
+        self.assertIn("App Store: off", out)
+        calls = len(self.server.calls())
+        code, out = self.server.heliedan("remove-store")  # again: nothing more to do, no restart
+        self.assertEqual(code, 0, out)
+        self.assertIn("not installed: nothing to remove", out)
+        self.assertNotIn("systemctl restart panel", self.server.calls()[calls:])
 
     def test_unit_file_already_deleted(self):
         """Someone deleted the unit by hand: disable cannot work, the rest goes anyway (dangling link included)."""
@@ -429,6 +505,8 @@ class Revert(HeliedanTest):
     def assert_reverted(self, code, out):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.server.store_left(), [], out)
+        self.assertEqual(self.server.journal_left(), [], out)
+        self.assertFalse(self.server.running("swizzin-journal.socket"))
         self.assertFalse(self.server.running("swizzin-store"))
         self.assertEqual(git(self.server.panel, "rev-parse", "--abbrev-ref", "HEAD"), "master")  # the backup
         self.assertFalse(os.path.exists(os.path.join(self.server.panel, "store-helper")))
@@ -441,11 +519,18 @@ class Revert(HeliedanTest):
         self.assert_reverted(*self.server.heliedan("revert"))
         code, out = self.server.heliedan("status")
         self.assertIn("App Store service: not installed", out)
+        self.assertIn("Journal reader (Logs buttons): not installed", out)
+
+    def test_without_the_app_store(self):
+        """The default of a new install: only the journal reader to remove."""
+        remove_pieces(self.server)
+        self.assert_reverted(*self.server.heliedan("revert"))
 
     @unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
     def test_after_box_upgrade_panel(self):
         self.require_src()
         self.server.swizzin("upgrade/panel.sh")
+        self.assertFalse(os.path.exists(os.path.join(self.server.panel, "journal-helper")))  # its marker goes too
         self.assert_reverted(*self.server.heliedan("revert"))
 
     def test_the_panel_is_not_touched_if_the_service_stays(self):
@@ -508,6 +593,115 @@ class Install(HeliedanTest):
         self.assertEqual(sorted(b.split("-")[0] for b in backups), ["original", "original.info", "replaced", "replaced"])
         with open(self.server.path("/var/backups/heliedan/original.info")) as f:
             self.assertIn("branch=heliedan", f.read())  # this panel, as it is now
+
+
+class EnableStore(HeliedanTest):
+    """The App Store is off by default: enable-store installs its root service and turns it on in swizzin.cfg."""
+
+    def setUp(self):
+        super().setUp()
+        remove_pieces(self.server)  # a new install: no App Store
+        write(self.server.cfg, "# the admin's own settings\n")
+
+    def test_turns_it_on(self):
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 0, out)
+        self.assertIn("run_installer store-helper", self.server.calls())
+        self.assertTrue(self.server.running("swizzin-store"))
+        self.assertEqual(self.server.read_cfg(), "# the admin's own settings\nAPP_STORE = True  # the App Store: "
+                         "heliedan.sh enable-store and remove-store change it\n")
+        self.assertEqual(self.server.calls()[-1], "systemctl is-active --quiet panel")  # restarted, and running
+        self.assertIn("systemctl restart panel", self.server.calls())
+        self.assertIn("Done: the App Store is in the sidebar", out)
+        self.helper()  # the service now runs, idle (enable-store never cuts off a job)
+        code, out = self.server.heliedan("enable-store")  # again: the service updated, one line in swizzin.cfg
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.server.read_cfg().count("APP_STORE"), 1)
+        code, out = self.server.heliedan("status")
+        self.assertIn("App Store: on", out)
+
+    def test_a_failure_leaves_it_off(self):
+        open(os.path.join(self.base, "store-helper.fails"), "w").close()
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 1, out)
+        self.assertIn("the App Store stays off", out)
+        self.assertEqual(self.server.read_cfg(), "# the admin's own settings\n")
+        self.assertNotIn("systemctl restart panel", self.server.calls())
+
+    def test_only_with_the_edition_and_its_own_files(self):
+        changed = os.path.join(self.server.panel, "store-helper", "swizzin_store.py")
+        with open(changed, "a") as f:
+            f.write("# changed by the panel's user\n")
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 1, out)
+        self.assertIn("the files of store-helper/ in the panel were changed", out)
+        git(self.server.panel, "checkout", "-q", "--", "store-helper")
+        write(os.path.join(self.server.panel, "store-helper", "extra.py"), "# added by the panel's user\n")
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 1, out)
+        os.unlink(os.path.join(self.server.panel, "store-helper", "extra.py"))
+        os.unlink(changed)  # box upgrade panel: no longer the edition
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 1, out)
+        self.assertIn("the panel is not Heliedan's edition", out)
+        self.assertNotIn("run_installer store-helper", self.server.calls())
+        self.assertEqual(self.server.read_cfg(), "# the admin's own settings\n")
+
+    @unittest.skipUnless(HAVE_SRC or SRC_REQUIRED, "no copy of Swizzin (set SWIZZIN_SRC)")
+    def test_not_after_box_remove_panel(self):
+        self.require_src()
+        self.server.swizzin("remove/panel.sh")
+        code, out = self.server.heliedan("enable-store")
+        self.assertEqual(code, 1, out)
+        self.assertIn("no Swizzin panel in", out)
+        self.assertIn("heliedan.sh remove-store", out)  # the journal reader is left behind
+
+
+class StoreSetting(HeliedanTest):
+    """store_setting writes APP_STORE in swizzin.cfg, as root in a folder that the panel's user owns."""
+
+    def set(self, value="True"):
+        return self.server.heliedan(value, call="store_setting")
+
+    def test_one_line_the_rest_kept(self):
+        write(self.server.cfg, "ADMIN_USER = 'tester'\nAPP_STORE=False\n# APP_STORE = True, a comment\n"
+                               "APP_STORE   =   True # twice\nHOST = '127.0.0.1'")  # no new line at the end
+        os.chmod(self.server.cfg, 0o640)
+        self.assertEqual(self.set(), (0, ""))
+        self.assertEqual(self.server.read_cfg(), "ADMIN_USER = 'tester'\n# APP_STORE = True, a comment\nHOST = "
+                         "'127.0.0.1'\nAPP_STORE = True  # the App Store: heliedan.sh enable-store and remove-store "
+                         "change it\n")
+        st = os.stat(self.server.cfg)
+        self.assertEqual((st.st_mode & 0o777, st.st_uid), (0o640, os.getuid()))  # its mode and owner
+        self.assertEqual([n for n in os.listdir(os.path.dirname(self.server.panel)) if "cfg" in n], [])  # none left
+        code, _ = self.server.heliedan(call="store_on")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.set("False"), (0, ""))
+        code, _ = self.server.heliedan(call="store_on")
+        self.assertEqual(code, 1)
+
+    def test_a_missing_file_is_made(self):
+        os.unlink(self.server.cfg)
+        self.assertEqual(self.set(), (0, ""))
+        self.assertEqual(self.server.read_cfg(), "APP_STORE = True  # the App Store: heliedan.sh enable-store and "
+                         "remove-store change it\n")
+        self.assertEqual(os.stat(self.server.cfg).st_mode & 0o777, 0o644)
+
+    def test_never_through_a_link(self):
+        """The panel's user may replace swizzin.cfg with a link (to a file only root can read, say): root neither
+        reads nor writes through it."""
+        secret = os.path.join(self.base, "secret")
+        write(secret, "APP_STORE = True\nroot's secret\n")
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind):
+                os.unlink(self.server.cfg)
+                (os.symlink if kind == "symlink" else os.link)(secret, self.server.cfg)
+                code, out = self.set("False")
+                self.assertEqual(code, 1, out)
+                self.assertIn("APP_STORE was not changed", out)
+                with open(secret) as f:
+                    self.assertEqual(f.read(), "APP_STORE = True\nroot's secret\n")
+                self.assertNotIn("secret", os.listdir(os.path.dirname(self.server.panel)))
 
 
 # Fake panel Python for update_packages: tests/test_requirements.py passes once $FAKE_STATE/packages.ok exists, which
@@ -583,7 +777,7 @@ class InstalledWithBox(HeliedanTest):
 
     def test_install_revert_and_remove_store_are_refused(self):
         before = tree(self.server.root)
-        for command in ("install", "revert", "remove-store"):
+        for command in ("install", "revert", "enable-store", "remove-store"):
             code, out = self.server.heliedan(command)
             self.assertEqual(code, 1, out)
             self.assertIn("installed with box install altdash", out)
@@ -634,6 +828,8 @@ class Marker(unittest.TestCase):
         r = subprocess.run(["bash", HELIEDAN], capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn("sudo bash heliedan.sh remove-store", r.stdout)
+        self.assertIn("sudo bash heliedan.sh enable-store", r.stdout)
+        self.assertIn("If anything goes wrong, the panel is put back as it was.", r.stdout)  # the whole header
         self.assertNotIn("set -euo", r.stdout)
         r = subprocess.run(["bash", "-c", 'source "$1" && echo sourced', "test", HELIEDAN], capture_output=True,
                            text=True, env={"PATH": "/usr/bin:/bin"})

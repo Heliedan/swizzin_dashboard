@@ -1,0 +1,24 @@
+[Unit]
+Description=Swizzin journal reader socket (the Logs buttons of Heliedan's edition of the panel)
+# Only with Heliedan's edition of the panel, whose code carries this service's source: box remove panel and box
+# upgrade panel take it away, and the socket then does not start again (at boot), as swizzin-journal@.service does
+# not (at each connection).
+ConditionPathIsSymbolicLink=!/opt/swizzin/journal-helper/swizzin_journal.py
+ConditionFileNotEmpty=/opt/swizzin/journal-helper/swizzin_journal.py
+
+[Socket]
+ListenStream=/run/swizzin-journal/journal.sock
+# One swizzin-journal@.service per connection: it answers one request and exits.
+Accept=yes
+# Root and the panel's group only (the program checks the account again, SO_PEERCRED).
+SocketUser=root
+SocketGroup=swizzin
+SocketMode=0660
+DirectoryMode=0755
+# Stopped or removed, it leaves no socket behind in /run.
+RemoveOnStop=yes
+# The panel reads one journal at a time: a few at most, so that nothing can start many readers at once.
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

@@ -22,7 +22,7 @@ _ht.set_password("tester", "tester")
 _ht.set_password("other", "other")
 _ht.save()
 with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
-    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\n")
+    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\nAPP_STORE = True\n")
 
 import swizzin  # noqa: E402  (first: it runs eventlet.monkey_patch())
 import eventlet  # noqa: E402

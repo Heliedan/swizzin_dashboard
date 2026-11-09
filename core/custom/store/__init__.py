@@ -11,6 +11,10 @@ STORE_ASK_PASSWORD = False. Uninstalling always asks for it, and for the app's n
 the helper saves the app's settings first and removes only the apps it audited (see
 store-helper/removable.py); this module only words what the user is told.
 
+The App Store is optional and off by default: the page, its sidebar entry, its routes and its namespace exist only
+when swizzin.cfg says APP_STORE = True, which `heliedan.sh enable-store` writes when it installs the root service
+(`heliedan.sh remove-store` writes False). Otherwise /apps answers 404, as on the official panel.
+
 This package lives in core/custom/ so that `box upgrade panel` keeps it. register() runs
 once per import of swizzin.py (it is imported twice at startup), so it creates its own
 Blueprint each time and has no other side effect.
@@ -299,10 +303,23 @@ class HelperLink:
         self.sock.close()
 
 
+def setting(config, logger=None):
+    """APP_STORE from swizzin.cfg: False (the default) or True. Any other value counts as False, with a warning in the
+    log: a badly written setting must neither stop the panel nor turn the App Store on."""
+    value = config.get("APP_STORE", False)
+    if isinstance(value, bool):
+        return value
+    if logger is not None:
+        logger.warning("swizzin.cfg: APP_STORE = %r is invalid (expected True or False), False used instead", value)
+    return False
+
+
 def register(app, socketio, htpasswd):
-    """Add the App Store page to this app, unless it is a shared server or disabled in swizzin.cfg."""
-    if app.config.get("SHAREDSERVER") or app.config.get("STORE_ENABLED") is False:
-        app.config["STORE_ENABLED"] = False
+    """Add the App Store page to this app when swizzin.cfg says APP_STORE = True, unless it is a shared server;
+    app.config["APP_STORE"] then says whether it is there (the sidebar entry, templates/macros.html)."""
+    on = setting(app.config, app.logger) and not app.config.get("SHAREDSERVER")
+    app.config["APP_STORE"] = False  # until the page is really there
+    if not on:
         return
     bp = flask.Blueprint("store", __name__, template_folder="templates",
                          static_folder="static", static_url_path="/store/static")
@@ -361,7 +378,7 @@ def register(app, socketio, htpasswd):
         return response
 
     app.register_blueprint(bp)
-    app.config["STORE_ENABLED"] = True
+    app.config["APP_STORE"] = True
     if socketio is None:
         return
 

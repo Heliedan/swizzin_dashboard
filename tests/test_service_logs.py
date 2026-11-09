@@ -1,8 +1,9 @@
 """The Logs buttons of Service Info (core/service_logs.py): the route POST /apps/logs, the unit it asks for, what
-systemd says without root, every answer of the App Store's root service, the settings, and the pages.
+systemd says without root, every answer of the journal reader, the settings, and the pages.
 
-The root service is the real one (store-helper/swizzin_store.py), started without root on a temporary socket with a
-fake journalctl; systemctl is a fake one too. Run from the repository root: python tests/test_service_logs.py
+The reader is the real one (journal-helper/swizzin_journal.py), started as systemd does (tests/test_journal_helper.py)
+on a temporary socket with a fake journalctl; systemctl is a fake one too. The App Store stays off (its default): the
+Logs buttons do not need it. Run from the repository root: python tests/test_service_logs.py
 (uses a throwaway htpasswd file: nothing on the machine is touched)."""
 import base64
 import json
@@ -33,12 +34,11 @@ with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
 import swizzin  # noqa: E402  (first: it patches the whole process for eventlet)
 import flask  # noqa: E402
 from core import service_logs  # noqa: E402
-from test_store_helper import Helper, fake_swizzin  # noqa: E402
-from test_store_journal import FAKE  # noqa: E402
+from test_journal_helper import FAKE, Reader  # noqa: E402
 
 TRAP = "<img src=x onerror=alert(1)> it's \"mine\" & yours"
-# How the panel says to set up or update the root service, with this edition installed by heliedan.sh or by box
-HOW = ((False, "sudo bash heliedan.sh install"), (True, "sudo ALTDASH_STORE=yes box upgrade altdash"))
+# How the panel says to set up the reader, with this edition installed by heliedan.sh or by box
+HOW = ((False, "sudo bash heliedan.sh install"), (True, "sudo box upgrade altdash"))
 PAGES = [{"name": "sonarr", "pretty_name": "Sonarr", "url": "https://demo.invalid/sonarr", "systemd": "sonarr",
           "img": "sonarr"},
          {"name": "rtorrent", "pretty_name": "rTorrent", "url": False, "systemd": "rtorrent@", "img": "rtorrent"},
@@ -81,14 +81,13 @@ class LogsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.base = tempfile.mkdtemp()
-        fake_swizzin(cls.base)
         cls.bin = os.path.join(cls.base, "bin")
         os.mkdir(cls.bin)
         for name, source in (("journalctl", FAKE), ("systemctl", FAKE_SYSTEMCTL)):
             with open(os.path.join(cls.bin, name), "w") as f:
                 f.write(source.format(python=sys.executable))
             os.chmod(os.path.join(cls.bin, name), 0o755)
-        cls.helper = Helper(cls.base, extra=("--journalctl", os.path.join(cls.bin, "journalctl"),
+        cls.helper = Reader(cls.base, extra=("--journalctl", os.path.join(cls.bin, "journalctl"),
                                              "--journal-timeout", "1"))
 
     @classmethod
@@ -108,7 +107,7 @@ class LogsTest(unittest.TestCase):
                 os.unlink(os.path.join(self.bin, name))
             except FileNotFoundError:
                 pass
-        for patcher in (mock.patch.dict(swizzin.app.config, {"STORE_SOCKET": self.helper.path}),
+        for patcher in (mock.patch.dict(swizzin.app.config, {"JOURNAL_SOCKET": self.helper.path}),
                         mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"]}),
                         mock.patch("core.util.generate_page_list", return_value=PAGES),
                         mock.patch.object(swizzin.limiter, "enabled", False)):
@@ -262,39 +261,32 @@ class State(LogsTest):
 
 
 class Journal(LogsTest):
-    def test_without_the_root_service(self):
-        """heliedan.sh remove-store, or never installed: the panel says how to set it up, and shows the state."""
+    def test_without_the_reader(self):
+        """Not installed (the panel switched by hand, or by an older heliedan.sh): the panel says how to set it up, and
+        shows the state."""
         missing = os.path.join(self.base, "no-such.sock")
         real_isfile = os.path.isfile
         for altdash, how in HOW:
             with self.subTest(altdash=altdash), \
-                    mock.patch.dict(swizzin.app.config, {"STORE_SOCKET": missing}), \
+                    mock.patch.dict(swizzin.app.config, {"JOURNAL_SOCKET": missing}), \
                     mock.patch.object(swizzin.os.path, "isfile", side_effect=lambda p: altdash if
                                       p == "/install/.altdash.lock" else real_isfile(p)):
                 with self.assertLogs(swizzin.app.logger, "WARNING") as logs:
                     data = self.logs()
-                self.assertIn("App Store service does not answer", logs.output[0])
+                self.assertIn("journal reader does not answer", logs.output[0])
                 self.assertEqual((data["journal"], data["lines"]), ("missing", []))
                 self.assertIn(how, data["message"])
                 self.assertEqual(data["state"]["restarts"], 4)
 
-    def test_an_older_root_service(self):
-        """One from before the operation "journal" answers bad-request: the panel says to update it."""
-        real_isfile = os.path.isfile
-        for altdash, how in HOW:
-            with self.subTest(altdash=altdash), \
-                    mock.patch.object(service_logs, "helper_call",
-                                      return_value={"ok": False, "error": "bad-request"}), \
-                    mock.patch.object(swizzin.os.path, "isfile", side_effect=lambda p: altdash if
-                                      p == "/install/.altdash.lock" else real_isfile(p)):
-                data = self.logs()
-            self.assertEqual((data["journal"], data["lines"]), ("outdated", []))
-            self.assertIn("older than the panel", data["message"])
-            self.assertIn(how + " updates it", data["message"])
-            self.assertEqual(data["state"]["active"], "active")
+    def test_the_app_store_is_not_needed(self):
+        """The App Store is off (APP_STORE, its default): the Logs buttons read the journal all the same."""
+        self.assertFalse(swizzin.app.config["APP_STORE"])
+        self.assertNotIn("store", swizzin.app.blueprints)
+        data = self.logs()
+        self.assertEqual((data["journal"], data["lines"]), ("ok", LINES))
 
-    def test_a_service_the_root_service_does_not_read(self):
-        """A custom tile (core/custom/profiles.py): its service is not in the root service's list."""
+    def test_a_service_the_reader_does_not_read(self):
+        """A custom tile (core/custom/profiles.py): its service is not in the reader's list."""
         data = self.logs("mytile")
         self.assertEqual((data["name"], data["unit"], data["journal"]), (TRAP, "mytile.service", "not-allowed"))
         self.assertIn("services the panel knows only", data["message"])
@@ -305,6 +297,7 @@ class Journal(LogsTest):
                                ({"ok": False, "error": "no-journal"}, "no-journal"),
                                ({"ok": False, "error": "failed"}, "error"),
                                ({"ok": False, "error": "invalid"}, "error"),
+                               ({"ok": False, "error": "bad-request"}, "error"),
                                ({"ok": False}, "error"), (["x"], "error"), ({"ok": "yes"}, "error"),
                                ({"ok": True, "lines": "abc"}, "empty")):
             with self.subTest(reply), mock.patch.object(service_logs, "helper_call", return_value=reply):
