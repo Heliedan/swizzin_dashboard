@@ -28,7 +28,7 @@
       {% if box_install %}
       Install it with <code>ALTDASH_STORE=yes box upgrade altdash</code>, or check it with <code>systemctl status swizzin-store</code>.
       {% else %}
-      Install it with <code>store-helper/install.sh</code> (see the README), or check it with <code>systemctl status swizzin-store</code>.
+      Install it with <code>sudo bash heliedan.sh enable-store</code> (see the README), or check it with <code>systemctl status swizzin-store</code>.
       {% endif %}
       {% else %}
       The App Store helper could not read the list of Swizzin applications. See <code>journalctl -u swizzin-store</code>.

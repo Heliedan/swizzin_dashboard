@@ -55,6 +55,19 @@ The automatic tests set `REQUIRE_NODE=1`: there, a missing `node` makes it fail 
 The tests do not need root: run them as a normal user.
 As root, `tests/test_store_helper.py` ends with `OK (skipped=2)`: the helper always lets root in,
 so the two tests of refused connections cannot run.
+`tests/test_journal_helper.py` ends with `OK (skipped=1)` without `systemd-analyze`, which checks the journal
+reader's units; as root, it checks the refused accounts on the reader's code only, as the reader always lets root in.
+
+## Changes to the journal reader's units
+
+`journal-helper/swizzin-journal@.service` runs the reader with as few rights as possible.
+A setting there can stop it on some systems, and the tests cannot see that:
+a list of system calls that is too short kills the reader (or `journalctl`) the first time it needs another one.
+Any change to these units must be tried on a real systemd, a throwaway container or virtual machine with Swizzin and
+the panel: install the edition, open a Logs button, and read `journalctl -t swizzin-journal` and
+`journalctl -u 'swizzin-journal@*'`.
+Try it once where namespaces are allowed (a virtual machine) and once where they are not (a container):
+systemd then skips some settings, with a line in the journal.
 
 ## Changes to the uninstall table
 

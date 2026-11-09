@@ -26,7 +26,7 @@ _ht = HtpasswdFile(os.path.join(_tmp, "htpasswd"), new=True)
 _ht.set_password("tester", "tester")
 _ht.save()
 with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
-    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\n")
+    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\nAPP_STORE = True\n")  # its page too
 
 import swizzin  # noqa: E402
 from core.middleware import PrefixMiddleware  # noqa: E402

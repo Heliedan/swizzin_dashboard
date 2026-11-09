@@ -1,0 +1,60 @@
+[Unit]
+Description=Swizzin journal reader (reads the journal of a service for the panel, read-only)
+Documentation=https://github.com/Heliedan/swizzin_dashboard#service-logs
+# See swizzin-journal.socket.
+ConditionPathIsSymbolicLink=!/opt/swizzin/journal-helper/swizzin_journal.py
+ConditionFileNotEmpty=/opt/swizzin/journal-helper/swizzin_journal.py
+# A failed read leaves no unit behind.
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/swizzin-journal/swizzin_journal.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+SyslogIdentifier=swizzin-journal
+# Not root: its own system user, made by install.sh, with the group that may read the journal.
+User=swizzin-journal
+Group=swizzin-journal
+SupplementaryGroups=systemd-journal
+# journalctl has 5 seconds: anything still there after 20 is stopped.
+RuntimeMaxSec=20
+UMask=0077
+# It reads and answers, nothing else: no privileges, no network, nothing to write, a few system calls.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+# Also read-only: with ProtectProc= below, systemd leaves /run writable (/run/lock is open to every account), and
+# /dev/shm and /dev/mqueue are too; the reader needs none of them (its socket comes open from systemd).
+ReadOnlyPaths=/run -/dev/shm -/dev/mqueue
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Only its own processes in /proc, and nothing else of /proc (systemd 247 or newer; older ones ignore these two lines
+# with a warning in their log).
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+KeyringMode=private
+DevicePolicy=closed
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# A call outside the list fails with EPERM rather than killing the reader: neither Python nor journalctl needs one
+# today (tried with systemd 245 to 255), and a future version that does will get an error it can handle.
+SystemCallErrorNumber=EPERM

@@ -17,6 +17,7 @@ class Config:
     FORMS_LOGIN = True
     NETWORK_TOTALS = False
     DISK_UNITS = "iec"
+    APP_STORE = False  # the App Store page and its root service: heliedan.sh enable-store (core/custom/store)
     DASHBOARD_LAYOUT = "classic"  # or "overview": the layout of the accounts that chose none (core/layouts.py)
     UPDATES_CHECK = True  # Overview: count the pending updates of apt for the admin (core/system_status.py)
     SERVICE_LOGS = True  # the admin's Logs buttons of Service Info, in Overview (core/service_logs.py)

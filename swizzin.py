@@ -67,6 +67,7 @@ try:  # App Store page (core/custom/store, see the README): a problem there must
     from core.custom import store as app_store
     app_store.register(app, socketio, htpasswd)
 except Exception:
+    app.config["APP_STORE"] = False
     app.logger.exception("App Store disabled: it could not be loaded")
 try:  # Logs buttons of Service Info (core/service_logs.py, see the README): a problem there must not stop the panel
     from core import service_logs

@@ -140,6 +140,14 @@ class StoreHelper(unittest.TestCase):
         self.assertEqual({n for n, a in apps.items() if a["blocked"]}, {"altdash", "letsencrypt", "nginx", "panel"})
         self.assertIn("install", reply["features"])  # the panel shows only what this version can do
 
+    def test_it_no_longer_reads_the_journal(self):
+        """The journal is read by journal-helper/, which does not run as root: this service neither offers nor
+        answers the operation "journal" any more."""
+        with self.helper.connect() as s:
+            self.assertEqual(ask(s, b'{"op": "catalogue"}\n')["features"], ["install", "remove"])
+            self.assertEqual(ask(s, b'{"op": "journal", "unit": "sonarr.service"}\n'),
+                             {"ok": False, "error": "bad-request"})
+
     def test_list_is_read_again_at_each_request(self):
         with self.helper.connect() as s:
             ask(s, b'{"op": "catalogue"}\n')

@@ -22,7 +22,7 @@ _ht.set_password("tester", "tester")
 _ht.set_password("other", "other")
 _ht.save()
 with open(os.path.join(ROOT, "swizzin.cfg"), "w") as f:
-    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\n")
+    f.write(f"FLASK_HTPASSWD_PATH = '{_tmp}/htpasswd'\nADMIN_USER = 'tester'\nAPP_STORE = True\n")
 
 import swizzin  # noqa: E402  (first: it runs eventlet.monkey_patch())
 import flask  # noqa: E402
@@ -170,7 +170,7 @@ class StorePage(unittest.TestCase):
             swizzin.app.config["STORE_SOCKET"] = self.helper.path
         self.assertEqual(r.status_code, 200)
         self.assertIn("The App Store helper is not running", html)
-        self.assertIn("store-helper/install.sh", html)
+        self.assertIn("sudo bash heliedan.sh enable-store", html)
         self.assertNotIn("box upgrade altdash", html)
         self.assertNotIn("store-item", html)
 
@@ -185,7 +185,7 @@ class StorePage(unittest.TestCase):
             swizzin.app.config["STORE_SOCKET"] = self.helper.path
         self.assertEqual(r.status_code, 200)
         self.assertIn("ALTDASH_STORE=yes box upgrade altdash", html)
-        self.assertNotIn("store-helper/install.sh", html)
+        self.assertNotIn("heliedan.sh", html)
 
     def test_sidebar_link_for_the_admin_only(self):
         link = 'App Store</a>'
@@ -195,16 +195,24 @@ class StorePage(unittest.TestCase):
 
     def test_disabled_on_shared_servers(self):
         app = flask.Flask("shared")
-        app.config.update(SHAREDSERVER=True, ADMIN_USER="tester")
+        app.config.update(SHAREDSERVER=True, ADMIN_USER="tester", APP_STORE=True)
         store.register(app, None, swizzin.htpasswd)
-        self.assertFalse(app.config["STORE_ENABLED"])
+        self.assertFalse(app.config["APP_STORE"])
         self.assertNotIn("store", app.blueprints)
 
-    def test_disabled_in_swizzin_cfg(self):
-        app = flask.Flask("off")
-        app.config.update(STORE_ENABLED=False, ADMIN_USER="tester")
-        store.register(app, None, swizzin.htpasswd)
-        self.assertNotIn("store", app.blueprints)
+    def test_off_unless_swizzin_cfg_turns_it_on(self):
+        """APP_STORE: False by default; only True turns it on, and another value counts as False, with a warning."""
+        for settings, on, warned in (({}, False, False), ({"APP_STORE": False}, False, False),
+                                     ({"APP_STORE": True}, True, False), ({"APP_STORE": "True"}, False, True),
+                                     ({"APP_STORE": 1}, False, True), ({"APP_STORE": None}, False, True)):
+            with self.subTest(settings):
+                app = flask.Flask("store-setting")
+                app.config.update(ADMIN_USER="tester", **settings)
+                with mock.patch.object(app.logger, "warning") as warning:
+                    store.register(app, None, swizzin.htpasswd)
+                self.assertIs(app.config["APP_STORE"], on)
+                self.assertEqual("store" in app.blueprints, on)
+                self.assertEqual(warning.called, warned)
 
 
     def test_uninstall_reason_and_no_framing(self):

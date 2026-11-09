@@ -16,9 +16,6 @@ Operations:
   {"op": "remove-preview", "app"}        -> {"ok", "preview": {users, services, partial, estimate, archives, retry},
                                              "ticket"} (what the confirmation shows; the ticket is good for 5 minutes)
   {"op": "remove", "app", "ticket", "confirm", "requester", "rows", "cols"} -> {"ok", "started": job, "control_key"}
-  {"op": "journal", "unit", "lines", "requester"} -> {"ok", "lines": [text], "cut", "status"} or {"ok": false, "error"}
-                                         (the last lines of the journal of a service of the panel's profiles, see
-                                          JOURNAL_UNITS; read without holding up the other requests or a job)
 
 An installation runs `box install <app>` in a pseudo-terminal, exactly as over SSH (the
 installers ask their questions on /dev/tty and draw whiptail menus), then `box test <app>`
@@ -79,7 +76,7 @@ MAX_INPUT = 4096
 REPLAY = 512 * 1024
 MAX_LOG = 50 * 1024 * 1024
 KEEP_LOGS = 20
-FEATURES = ["install", "remove", "journal"]  # tells the panel which operations this version of the service offers
+FEATURES = ["install", "remove"]  # tells the panel which operations this version of the service offers
 TICKET_TTL = 300  # seconds a confirmation window may stay open before uninstalling
 REMOVE_STOP_WAIT = 540  # seconds this service waits for a removal when told to stop (its TimeoutStopSec is 600)
 REMOVE_PHASES = ("check", "stop", "copy", "remove", "fix", "verify")
@@ -98,38 +95,6 @@ JOB_ENV = {"HOME": "/root", "USER": "root", "LOGNAME": "root", "SHELL": "/bin/ba
            "LANG": "C.UTF-8", "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin/swizzin",
            "GIT_TERMINAL_PROMPT": "0", "NEEDRESTART_SUSPEND": "1", "PAGER": "cat", "SYSTEMD_PAGER": "cat",
            "LESSSECURE": "1"}
-
-# The journal, for the Logs buttons of the panel (admin only, checked by the panel). Only the services of the panel's
-# profiles (core/profiles.py and core/profiles_shared.py; tests/test_store_journal.py keeps this list in step with
-# them), never another unit of the system: the panel's own list lives where the panel user can write, so this service
-# keeps its copy. A name that ends with @ is a template: any one instance of it (rtorrent@<user>.service).
-JOURNAL_UNITS = frozenset((
-    "audiobookshelf@", "autobrr@", "bazarr", "bazarr@", "btsync@", "calibrecs", "calibreweb", "couchpotato",
-    "deluge-web@", "deluged@", "emby-server", "emby@", "filebrowser", "filebrowser@", "flood@", "headphones", "irssi@",
-    "jackett@", "jellyfin", "jellyfin@", "lidarr", "lidarr@", "lounge", "mango", "medusa", "medusa@", "mylar",
-    "navidrome", "netdata", "netronome@", "nextcloud@", "nzbget@", "nzbhydra", "ombi", "ombi@", "plex@",
-    "plexmediaserver", "plexpy@", "prowlarr", "prowlarr@", "pyload", "qbittorrent@", "quasselcore", "qui@", "radarr",
-    "radarr@", "readarr", "readarr@", "resilio-sync", "rtorrent@", "sabnzbd", "sabnzbd@", "shellinabox", "sickchill",
-    "sickgear", "sonarr", "sonarr@", "subsonic", "syncthing@", "tautulli", "tautulli@", "thelounge@", "transmission@",
-    "webmin", "wg-quick@", "xmrig", "znc"))
-# A unit's name as the panel sends it: never an option (it starts with a letter or a digit), a path (no /, and
-# journal_unit refuses ..), a pattern (journalctl takes * ? [ as one) or another type of unit.
-UNIT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9@._-]{0,200}\.service")
-JOURNAL_LINES = 100  # lines asked when the panel says nothing usable
-MAX_JOURNAL_LINES = 200
-JOURNAL_TIMEOUT = 5  # seconds journalctl has to answer
-MAX_JOURNAL_OUTPUT = 256 * 1024  # bytes of its output kept, the newest (the answer then stays under MAX_PENDING_OUTPUT)
-MAX_JOURNAL_ROWS = 2000  # lines sent at most (a message of several lines prints several)
-MAX_JOURNAL_LINE = 1000  # characters of a line shown
-JOURNALCTL = ("/usr/bin/journalctl", "/bin/journalctl")  # /bin only, on a Debian 11 whose /usr is not merged
-# journalctl's whole environment: plain text, no pager, no colours, no links.
-JOURNAL_ENV = {"LANG": "C.UTF-8", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "PAGER": "cat", "SYSTEMD_PAGER": "cat",
-               "SYSTEMD_COLORS": "0", "SYSTEMD_URLIFY": "0", "LESSSECURE": "1"}
-# Removed from the lines: the terminal's escape sequences (colours, titles, links... an app may write them in its
-# log); then every control character left is shown as U+FFFD, and so are the characters that reorder text on screen.
-ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]?|\][^\x07\x1b\n]*(?:\x07|\x1b\\)?|[PX^_][^\x1b\n]*(?:\x1b\\)?"
-                    r"|[ -/]*[0-~]?)")
-CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 
 log = logging.getLogger("swizzin-store")
 
@@ -168,8 +133,6 @@ def options(argv=None):
     p.add_argument("--panel-marker", default=PANEL_MARKER,
                    help="the file of Heliedan's edition of the panel without which this service does not run")
     p.add_argument("--marker-every", type=float, default=MARKER_EVERY, help="tests: seconds between two looks at it")
-    p.add_argument("--journalctl", help="tests: the journalctl to run (default: the system's, see JOURNALCTL)")
-    p.add_argument("--journal-timeout", type=float, default=JOURNAL_TIMEOUT, help="tests: seconds journalctl has")
     return p.parse_args(argv)
 
 
@@ -257,43 +220,6 @@ def removal_status(opts, table, app):
     return "ok"
 
 
-def journal_unit(unit):
-    """None when the panel may read the journal of this unit, else the error: invalid (not a service's name as the
-    panel sends it) or not-allowed (no profile of the panel has it, see JOURNAL_UNITS)."""
-    if not isinstance(unit, str) or not UNIT_NAME.fullmatch(unit) or ".." in unit:
-        return "invalid"
-    template, at, instance = unit[:-len(".service")].partition("@")
-    if at:
-        allowed = template + "@" in JOURNAL_UNITS and instance and "@" not in instance
-    else:
-        allowed = template in JOURNAL_UNITS
-    return None if allowed else "not-allowed"
-
-
-def journal_lines(value):
-    """How many lines to read: a whole number from 1 to MAX_JOURNAL_LINES, else JOURNAL_LINES."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        return JOURNAL_LINES
-    return min(max(value, 1), MAX_JOURNAL_LINES)
-
-
-def journal_text(data, cut):
-    """journalctl's output as lines a page can show as text, and whether some were left out (cut: its oldest
-    output was dropped, so its first line lost its beginning)."""
-    lines = data.decode("utf-8", "replace").split("\n")
-    if lines[-1] == "":
-        lines.pop()
-    if cut and len(lines) > 1:  # one line alone is the end of a very long one: kept, cut below
-        lines.pop(0)
-    if len(lines) > MAX_JOURNAL_ROWS:
-        lines, cut = lines[-MAX_JOURNAL_ROWS:], True
-    out = []
-    for line in lines:
-        line = CONTROL.sub("\ufffd", ESCAPE.sub("", line))
-        out.append(line[:MAX_JOURNAL_LINE] + "\u2026" if len(line) > MAX_JOURNAL_LINE else line)
-    return out, cut
-
-
 def requester(msg):
     """Who the panel says asked ("<account> from <address>"), for this service's log only."""
     who = msg.get("requester")
@@ -317,17 +243,6 @@ class Client:
         self.out = bytearray()
         self.closed = False
         self.attached = False
-
-
-class Reading:
-    """A read of the journal in progress: journalctl's output, gathered while the service goes on serving."""
-
-    def __init__(self, client, unit, proc, timeout):
-        self.client, self.unit, self.proc = client, unit, proc
-        self.fd = proc.stdout.fileno()
-        self.deadline = time.monotonic() + timeout
-        self.data = bytearray()
-        self.cut = False  # its oldest output was dropped (MAX_JOURNAL_OUTPUT)
 
 
 class Job:
@@ -393,8 +308,6 @@ class Helper:
         self.tickets = {}  # ticket -> (app, expiry): the confirmation window shown for an uninstallation
         self.marker_misses = 0  # looks in a row that did not find PANEL_MARKER
         self.stopping = False  # SIGTERM came (see main)
-        self.reading = None  # the read of the journal in progress (one at a time)
-        self.reaping = []  # journalctl processes killed and not collected yet
         if opts.allow_uid is not None:
             self.allowed, self.group = {0, opts.allow_uid}, None
         else:
@@ -448,8 +361,6 @@ class Helper:
         while not self.stopping:
             running = self.job is not None and self.job.phase != "done"
             wait = max(next_look - time.monotonic(), 0)
-            if self.reading is not None:
-                wait = min(wait, max(self.reading.deadline - time.monotonic(), 0))
             for key, events in self.sel.select(min(wait, 0.5) if running else wait):
                 if key.fileobj is self.waker:  # a signal, whose handler ran as select() returned
                     self.waker.recv(4096)
@@ -457,8 +368,6 @@ class Helper:
                     self._accept()
                 elif isinstance(key.data, Job):
                     self._on_pty(key.data)
-                elif isinstance(key.data, Reading):
-                    self._on_reading(key.data)
                 else:
                     c = key.data
                     if events & selectors.EVENT_READ:
@@ -466,7 +375,6 @@ class Helper:
                     if events & selectors.EVENT_WRITE and not c.closed:
                         self._write(c)
             self._poll_job()
-            self._poll_reading()
             if time.monotonic() >= next_look:
                 next_look = time.monotonic() + self.opts.marker_every
                 if self._panel_gone() and (self.job is None or self.job.phase == "done"):
@@ -526,7 +434,7 @@ class Helper:
         op = msg.get("op") if isinstance(msg, dict) else None
         handler = {"catalogue": self._op_catalogue, "install": self._op_install, "attach": self._op_attach,
                    "input": self._op_input, "resize": self._op_resize, "remove-preview": self._op_remove_preview,
-                   "remove": self._op_remove, "journal": self._op_journal}.get(op) if isinstance(op, str) else None
+                   "remove": self._op_remove}.get(op) if isinstance(op, str) else None
         if handler is None:
             self._send(c, {"ok": False, "error": "bad-request"})
             return
@@ -571,8 +479,6 @@ class Helper:
         del self.clients[c.sock]
         if self.job is not None and self.job.controller is c:
             self.job.controller = None
-        if self.reading is not None and self.reading.client is c:  # nobody waits for these lines any more
-            self._end_reading(self.reading, "gone")
 
     # --- operations --------------------------------------------------------------------------
 
@@ -664,94 +570,6 @@ class Helper:
             fcntl.ioctl(job.fd, termios.TIOCSWINSZ, struct.pack("HHHH", job.size[0], job.size[1], 0, 0))
         except OSError:
             pass
-
-    # --- the journal of a service --------------------------------------------------------------
-
-    def _op_journal(self, c, msg):
-        """The last lines of a service's journal: journalctl runs with a fixed command and environment, the unit given
-        as --unit=<name> (never a separate argument), and its output is gathered as it comes, so that the other
-        requests and a job go on meanwhile. One read at a time, JOURNAL_TIMEOUT seconds at most."""
-        unit = msg.get("unit")
-        error = journal_unit(unit)
-        journalctl = self._journalctl() if error is None else None
-        if error is None and self.reading is not None:
-            error = "busy"
-        elif error is None and journalctl is None:
-            error = "no-journal"
-        if error:
-            if error in ("invalid", "not-allowed"):  # the panel never asks for these: noted
-                log.warning("journal of %s refused (%s) for %s", repr(unit)[:120], error, requester(msg))
-            self._send(c, {"ok": False, "error": error})
-            return
-        lines = journal_lines(msg.get("lines"))
-        argv = [journalctl, "--unit=" + unit, "--lines=%d" % lines, "--output=short-iso", "--no-hostname", "--all",
-                "--quiet", "--no-pager"]
-        try:  # its own session: killed with whatever it started, without touching this service
-            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    env=JOURNAL_ENV, cwd="/", start_new_session=True)
-        except OSError as e:
-            log.error("journal of %s: %s", unit, e)
-            self._send(c, {"ok": False, "error": "failed"})
-            return
-        log.info("journal of %s (last %d lines) read for %s", unit, lines, requester(msg))
-        os.set_blocking(proc.stdout.fileno(), False)
-        self.reading = Reading(c, unit, proc, self.opts.journal_timeout)
-        self.sel.register(self.reading.fd, selectors.EVENT_READ, self.reading)
-
-    def _journalctl(self):
-        paths = (self.opts.journalctl,) if self.opts.journalctl else JOURNALCTL
-        return next((p for p in paths if os.path.isfile(p) and os.access(p, os.X_OK)), None)
-
-    def _on_reading(self, r):
-        try:
-            data = os.read(r.fd, 65536)
-        except BlockingIOError:
-            return
-        except OSError:
-            data = b""
-        if not data:
-            self._end_reading(r)
-            return
-        r.data += data
-        if len(r.data) > MAX_JOURNAL_OUTPUT:  # the newest lines come last: the oldest output goes
-            del r.data[:len(r.data) - MAX_JOURNAL_OUTPUT]
-            r.cut = True
-
-    def _poll_reading(self):
-        r = self.reading
-        if r is not None and time.monotonic() >= r.deadline:
-            log.warning("journal of %s: no end within %g seconds", r.unit, self.opts.journal_timeout)
-            self._end_reading(r, "timeout")
-        self.reaping = [p for p in self.reaping if p.poll() is None]
-
-    def _end_reading(self, r, error=None):
-        """Answers the read, with its lines or the error, and makes sure that journalctl is gone."""
-        self.reading = None
-        self.sel.unregister(r.fd)
-        r.proc.stdout.close()
-        status = r.proc.poll()
-        if status is None and error is None:  # the end of its output: it is exiting
-            try:
-                status = r.proc.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                pass
-        if status is None or error:  # still there, or cut off: with whatever it started (its session)
-            try:
-                os.killpg(r.proc.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            if status is None:
-                self.reaping.append(r.proc)  # collected by _poll_reading
-        if error:
-            self._send(r.client, {"ok": False, "error": error})
-            return
-        lines, cut = journal_text(bytes(r.data), r.cut)
-        self._send(r.client, {"ok": True, "lines": lines, "cut": cut, "status": status})
-
-    def stop_reading(self):
-        """The service is stopping: no journalctl left behind."""
-        if self.reading is not None:
-            self._end_reading(self.reading, "stopping")
 
     # --- uninstalling ------------------------------------------------------------------------
 
@@ -1153,7 +971,7 @@ def main(argv=None):
 
     def stop(*_):
         # The exit, at once, from wherever the main thread is. Python may run this handler inside an object's
-        # finalizer (a journalctl's Popen.__del__), which ignores the exit: run() then sees the flag and returns.
+        # finalizer (a Popen.__del__, for one), which ignores the exit: run() then sees the flag and returns.
         helper.stopping = True
         sys.exit(0)
     signal.signal(signal.SIGTERM, stop)
@@ -1161,7 +979,6 @@ def main(argv=None):
     try:
         helper.run()
     finally:
-        helper.stop_reading()
         helper.interrupt()
         try:
             os.unlink(opts.socket)
